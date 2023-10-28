@@ -1,4 +1,3 @@
-﻿# GUI-Definition
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -29,11 +28,11 @@ function Save-Config {
 
 # GUI-Fenster erstellen
 $Form = New-Object Windows.Forms.Form
-$Form.Text = "Ark Survival Ascended Server Wizard"
+$Form.Text = "ARK-Ascended-Server-Manager"
 $Form.Size = New-Object Drawing.Size(600, 500)
 
 # Skript Config
-$ScriptConfig = Join-Path $env:APPDATA "Ark_Survival_Ascended_Config\Ark_Survival_Ascended_Config.json"
+$ScriptConfig = Join-Path $env:APPDATA "ARK-Ascended-Server-Manager\Ark_Survival_Ascended_Config.json"
 
 
 # SteamCMD Pfad
@@ -183,8 +182,13 @@ function Update-GUIFromConfig {
     $BattleEyeComboBox.SelectedItem = $BattleEye
 }
 
-# Lese die Konfigurationsdaten aus der Datei
-$ConfigData = Get-Content -Path $ScriptConfig | ConvertFrom-Json
+# Lese die Konfigurationsdaten aus der Datei, wenn vorhanden
+if (Test-Path -Path $ScriptConfig) {
+    $ConfigData = Get-Content -Path $ScriptConfig | ConvertFrom-Json -ErrorAction SilentlyContinue
+} else {
+    Write-Output "Keine Konfigurationsdatei gefunden. Konfigurationsdaten werden nicht geladen."
+}
+
 
 # Verwende die gelesenen Daten
 $SteamCMD = $ConfigData.SteamCMD
@@ -197,8 +201,16 @@ $Port = $ConfigData.Port
 $QueryPort = $ConfigData.QueryPort
 $BattleEye = $ConfigData.BattleEye
 
-# Aktualisiere die GUI-Elemente mit den geladenen Konfigurationsdaten
-Update-GUIFromConfig
+# Lese die Konfigurationsdaten aus der Datei, wenn vorhanden
+if (Test-Path -Path $ScriptConfig) {
+    $ConfigData = Get-Content -Path $ScriptConfig | ConvertFrom-Json -ErrorAction SilentlyContinue
+
+    # Aktualisiere die GUI-Elemente mit den geladenen Konfigurationsdaten
+    Update-GUIFromConfig
+} else {
+    Write-Output "Keine Konfigurationsdatei gefunden. GUI-Elemente werden nicht aktualisiert."
+}
+
 
 # Funktion, um den ARK-Server zu starten
 function Start-ARKServer {
@@ -258,6 +270,8 @@ $ConfigUpdateButton.Add_Click({
 # Funktion zum Installieren des ARK-Servers
 function Install-ARKServer {
 
+    Update-Config
+
     # Verwende die gelesenen Daten
     $SteamCMD = $ConfigData.SteamCMD
     $ARKServerPath = $ConfigData.ARKServerPath
@@ -268,6 +282,7 @@ function Install-ARKServer {
     $Port = $ConfigData.Port
     $QueryPort = $ConfigData.QueryPort
     $BattleEye = $ConfigData.BattleEye
+    $TargetPath = ""
 
     # Der SteamCMD-Ordner wird im Verzeichnis erstellt, in dem das Skript ausgeführt wird
     $TargetPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD"
