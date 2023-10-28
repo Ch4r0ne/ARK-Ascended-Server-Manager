@@ -1,15 +1,15 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Konfigurationsdatei im AppData-Ordner erstellen
+# Create configuration file in the AppData folder
 $ConfigFolderPath = Join-Path $env:APPDATA "ARK-Ascended-Server-Manager"
 
-# Falls der Ordner nicht existiert, erstelle ihn
+# If the folder does not exist, create it
 if (-not (Test-Path -Path $ConfigFolderPath)) {
     New-Item -Path $ConfigFolderPath -ItemType Directory -Force
 }
 
-# Funktion zum Speichern der Konfigurationsdatei
+# Function for saving the configuration file
 function Save-Config {
     $ConfigData = @{
         SteamCMD = $SteamCMDPathTextBox.Text
@@ -26,16 +26,16 @@ function Save-Config {
 }
 
 
-# GUI-Fenster erstellen
+# Create GUI window
 $Form = New-Object Windows.Forms.Form
 $Form.Text = "ARK-Ascended-Server-Manager"
 $Form.Size = New-Object Drawing.Size(600, 500)
 
-# Skript Config
+# Script Config
 $ScriptConfig = Join-Path $env:APPDATA "ARK-Ascended-Server-Manager\Ark_Survival_Ascended_Config.json"
 
 
-# SteamCMD Pfad
+# SteamCMD path
 $SteamCMDLabel = New-Object Windows.Forms.Label
 $SteamCMDLabel.Text = "SteamCMD Pfad:"
 $SteamCMDLabel.Location = New-Object Drawing.Point(50, 50)
@@ -46,7 +46,7 @@ $SteamCMDPathTextBox.Location = New-Object Drawing.Point(200, 50)
 $SteamCMDPathTextBox.Size = New-Object Drawing.Size(300, 20)
 $Form.Controls.Add($SteamCMDPathTextBox)
 
-# ARK Server Pfad
+# ARK Server Path
 $ARKServerLabel = New-Object Windows.Forms.Label
 $ARKServerLabel.Text = "ARK Server Pfad:"
 $ARKServerLabel.Location = New-Object Drawing.Point(50, 80)
@@ -169,7 +169,7 @@ $StartServerButton.Text = "Start Server"
 $StartServerButton.Location = New-Object Drawing.Point(250, 350)
 $Form.Controls.Add($StartServerButton)
 
-# Funktion zum Aktualisieren der GUI-Elemente mit den geladenen Konfigurationsdaten
+# Function to update the GUI elements with the loaded configuration data
 function Update-GUIFromConfig {
     $SteamCMDPathTextBox.Text = $SteamCMD
     $ARKServerPathTextBox.Text = $ARKServerPath
@@ -182,7 +182,7 @@ function Update-GUIFromConfig {
     $BattleEyeComboBox.SelectedItem = $BattleEye
 }
 
-# Lese die Konfigurationsdaten aus der Datei, wenn vorhanden
+# Read the configuration data from the file, if available
 if (Test-Path -Path $ScriptConfig) {
     $ConfigData = Get-Content -Path $ScriptConfig | ConvertFrom-Json -ErrorAction SilentlyContinue
 } else {
@@ -190,7 +190,7 @@ if (Test-Path -Path $ScriptConfig) {
 }
 
 
-# Verwende die gelesenen Daten
+# Use the read data
 $SteamCMD = $ConfigData.SteamCMD
 $ARKServerPath = $ConfigData.ARKServerPath
 $ServerMAP = $ConfigData.ServerMAP
@@ -201,20 +201,20 @@ $Port = $ConfigData.Port
 $QueryPort = $ConfigData.QueryPort
 $BattleEye = $ConfigData.BattleEye
 
-# Lese die Konfigurationsdaten aus der Datei, wenn vorhanden
+# Read the configuration data from the file, if available
 if (Test-Path -Path $ScriptConfig) {
     $ConfigData = Get-Content -Path $ScriptConfig | ConvertFrom-Json -ErrorAction SilentlyContinue
 
-    # Aktualisiere die GUI-Elemente mit den geladenen Konfigurationsdaten
+    # Update the GUI elements with the loaded configuration data
     Update-GUIFromConfig
 } else {
     Write-Output "Keine Konfigurationsdatei gefunden. GUI-Elemente werden nicht aktualisiert."
 }
 
 
-# Funktion, um den ARK-Server zu starten
+# Function to start the ARK server
 function Start-ARKServer {
-    # Verwende die gelesenen Daten
+    # Use the read data
     $SteamCMD = $ConfigData.SteamCMD
     $ARKServerPath = $ConfigData.ARKServerPath
     $ServerMAP = $ConfigData.ServerMAP
@@ -225,20 +225,20 @@ function Start-ARKServer {
     $QueryPort = $ConfigData.QueryPort
     $BattleEye = $ConfigData.BattleEye
 
-    # Server starten
+    # Start server
     $ServerPath = Join-Path -Path $ARKServerPath -ChildPath "ShooterGame\Binaries\Win64\ArkAscendedServer.exe"
     $ServerArguments = "'$ServerMAP'?listen?SessionName=""'$ServerName'""?Port='$Port'?QueryPort='$QueryPort'?MaxPlayers='$MaxPlayers' -'$BattleEye'"
                    
     Start-Process -FilePath $ServerPath -ArgumentList $ServerArguments -NoNewWindow
 }
-# Rufe die Funktion auf, wenn der "Start Server" Button geklickt wird
+# Call the function when the "Start Server" button is clicked.
 $StartServerButton.Add_Click({
     Start-ARKServer
 })
 
-# Funktion, um den ARK-Server zu aktualisieren
+# Function to update the ARK server
 function Update-ARKServer {
-    # Verwende die gelesenen Daten
+    # Use the read data
     $SteamCMD = $ConfigData.SteamCMD
     $ARKServerPath = $ConfigData.ARKServerPath
     $ServerMAP = $ConfigData.ServerMAP
@@ -252,27 +252,29 @@ function Update-ARKServer {
     Start-Process -FilePath $SteamCMD\SteamCMD\steamcmd.exe -ArgumentList "+force_install_dir $ARKServerPath +login anonymous +app_update $AppID +quit" -Wait
 
 }
-# Rufe die Funktion auf, wenn der "Server Update" Button geklickt wird
+# Call the function when the "Server Update" button is clicked.
 $ServerUpdateButton.Add_Click({
     Update-ARKServer
 })
 
-# Funktion, um die Konfigurationsdatei zu aktualisieren
+# Function to update the configuration file
 function Update-Config {
-    # Lese die Variablen aus den GUI-Elementen und speichere sie in der Konfigurationsdatei
+    # Read the variables from the GUI elements and save them in the configuration file
     Save-Config
 }
-# Rufe die Funktion auf, wenn der "Config Update" Button geklickt wird
+# Call the function when the "Config Update" button is clicked.
 $ConfigUpdateButton.Add_Click({
     Update-Config
 })
 
-# Funktion zum Installieren des ARK-Servers
+# Function for installing the ARK server
 function Install-ARKServer {
 
     Update-Config
 
-    # Verwende die gelesenen Daten
+    $SteamCMD = ""
+    $TargetPath = ""
+    $SteamCMDExecutable = ""
     $SteamCMD = $ConfigData.SteamCMD
     $ARKServerPath = $ConfigData.ARKServerPath
     $ServerMAP = $ConfigData.ServerMAP
@@ -282,12 +284,11 @@ function Install-ARKServer {
     $Port = $ConfigData.Port
     $QueryPort = $ConfigData.QueryPort
     $BattleEye = $ConfigData.BattleEye
-    $TargetPath = ""
 
-    # Der SteamCMD-Ordner wird im Verzeichnis erstellt, in dem das Skript ausgeführt wird
+    # The SteamCMD folder is created in the directory where the script is run
     $TargetPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD"
 
-    # Erstelle den Zielordner, wenn er nicht existiert
+    # Create the destination folder if it does not exist
     if (-not (Test-Path -Path $TargetPath)) {
         New-Item -Path $TargetPath -ItemType Directory -Force
     }
@@ -316,13 +317,13 @@ function Install-ARKServer {
     # Output a confirmation message
     Write-Output "SteamCMD has been successfully downloaded, installed, and saved in the target folder: $TargetPath"
 
-    # Pfad zum Download-Verzeichnis
+    # Pfad Download-Folder
     $downloadPath = "%Temp%"
 
-    # URL für Visual C++ Redistributable-Download
+    # URL Visual C++ Redistributable-Download
     $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
-    # URL für DirectX Runtime-Download
+    # URL DirectX Runtime-Download
     $directXUrl = "https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
 
     # Überprüfen, ob Download-Verzeichnis vorhanden ist, andernfalls erstellen
@@ -330,20 +331,18 @@ function Install-ARKServer {
         New-Item -Path $downloadPath -ItemType Directory -Force
     }
 
-    # Download von Visual C++ Redistributable
+    # Download Visual C++ Redistributable
     Write-Output "Lade Visual C++ Redistributable herunter..."
     Invoke-WebRequest -Uri $vcRedistUrl -OutFile "$downloadPath\vc_redist.x64.exe"
 
-    # Download von DirectX Runtime
+    # Download DirectX Runtime
     Write-Output "Lade DirectX Runtime herunter..."
     Invoke-WebRequest -Uri $directXUrl -OutFile "$downloadPath\dxwebsetup.exe"
 
-    # Überprüfen, ob Visual C++ Redistributable bereits installiert ist
+    # Check if Visual C++ Redistributable is already installed
     if (!(Get-ItemProperty -Path "HKLM:\Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue)) {
         Write-Output "Visual C++ Redistributable nicht gefunden. Starte die Installation..."
-        # Pfad zur heruntergeladenen Visual C++-Installationsdatei
         $vcRedistPath = "$downloadPath\vc_redist.x64.exe"
-        # Installation von Visual C++ Redistributable
         $vcRedistProcess = Start-Process -FilePath $vcRedistPath -ArgumentList "/install", "/quiet", "/norestart" -PassThru -Wait
         if ($vcRedistProcess.ExitCode -eq 0) {
             Write-Output "Visual C++ Redistributable wurde erfolgreich installiert."
@@ -354,12 +353,10 @@ function Install-ARKServer {
         Write-Output "Visual C++ Redistributable bereits installiert."
     }
 
-    # Überprüfen, ob DirectX Runtime bereits installiert ist
+    # Check whether DirectX Runtime is already installed
     if (!(Test-Path "HKLM:\Software\Microsoft\DirectX" -ErrorAction SilentlyContinue)) {
         Write-Output "DirectX Runtime nicht gefunden. Starte die Installation..."
-        # Pfad zur heruntergeladenen DirectX-Installationsdatei
         $directXPath = "$downloadPath\dxwebsetup.exe"
-        # Installation von DirectX Runtime
         $directXProcess = Start-Process -FilePath $directXPath -ArgumentList "/silent" -PassThru -Wait
         if ($directXProcess.ExitCode -eq 0) {
             Write-Output "DirectX Runtime wurde erfolgreich installiert."
@@ -370,7 +367,7 @@ function Install-ARKServer {
         Write-Output "DirectX Runtime bereits installiert."
     }
 
-    # Definiere den Pfad zur SteamCMD-Exe relativ zum Skriptverzeichnis
+    # Define the path to the SteamCMD exe relative to the script directory
     $SteamCmdPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD\steamcmd.exe"
 
     # SteamCMD Installation und Update mit anonymem Account
