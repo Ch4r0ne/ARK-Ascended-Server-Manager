@@ -21,6 +21,8 @@ function Save-Config {
         Port = $PortTextBox.Text
         QueryPort = $QueryPortTextBox.Text
         BattleEye = $BattleEyeComboBox.SelectedItem.ToString()
+        AdminPassword = $AdminPasswordTextBox.Text
+        Password = $PasswordTextBox.Text
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -101,7 +103,7 @@ $Form.Controls.Add($AppIDLabel)
 
 $AppIDTextBox = New-Object Windows.Forms.TextBox
 $AppIDTextBox.Location = New-Object Drawing.Point(200, 200)
-$AppIDTextBox.Size = New-Object Drawing.Size(100, 20)
+$AppIDTextBox.Size = New-Object Drawing.Size(50, 20)
 $AppIDTextBox.Text = "2430930"
 $Form.Controls.Add($AppIDTextBox)
 
@@ -141,32 +143,54 @@ $BattleEyeComboBox.Location = New-Object Drawing.Point(200, 290)
 $BattleEyeComboBox.SelectedItem = "NoBattlEye"
 $Form.Controls.Add($BattleEyeComboBox)
 
+# Admin Password
+$AdminPasswordLabel = New-Object Windows.Forms.Label
+$AdminPasswordLabel.Text = "Admin Password:"
+$AdminPasswordLabel.Location = New-Object Drawing.Point(50, 320)
+$Form.Controls.Add($AdminPasswordLabel)
+
+$AdminPasswordTextBox = New-Object Windows.Forms.TextBox
+$AdminPasswordTextBox.Location = New-Object Drawing.Point(200, 320)
+$AdminPasswordTextBox.Size = New-Object Drawing.Size(150, 20)
+$Form.Controls.Add($AdminPasswordTextBox)
+
+# Password
+$PasswordLabel = New-Object Windows.Forms.Label
+$PasswordLabel.Text = "Password:"
+$PasswordLabel.Location = New-Object Drawing.Point(50, 350)
+$Form.Controls.Add($PasswordLabel)
+
+$PasswordTextBox = New-Object Windows.Forms.TextBox
+$PasswordTextBox.Location = New-Object Drawing.Point(200, 350)
+$PasswordTextBox.Size = New-Object Drawing.Size(150, 20)
+$Form.Controls.Add($PasswordTextBox)
+
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
 $InstallButton.Text = "Install"
-$InstallButton.Location = New-Object Drawing.Point(50, 350)
+$InstallButton.Location = New-Object Drawing.Point(50, 400)
 $Form.Controls.Add($InstallButton)
 
 # Config Update Button
 $ConfigUpdateButton = New-Object Windows.Forms.Button
-$ConfigUpdateButton.Text = "Config Update"
-$ConfigUpdateButton.Location = New-Object Drawing.Point(350, 350)
+$ConfigUpdateButton.Text = "WR Config"
+$ConfigUpdateButton.Location = New-Object Drawing.Point(350, 400)
 $Form.Controls.Add($ConfigUpdateButton)
 $ConfigUpdateButton.Add_Click({
     Save-Config
-    [Windows.Forms.MessageBox]::Show("Konfigurationsdatei wurde aktualisiert.", "Erfolg", [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)
+    [Windows.Forms.MessageBox]::Show("Konfig wurde aktualisiert.", "Erfolg", [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)
 })
 
 # Server Update Button
 $ServerUpdateButton = New-Object Windows.Forms.Button
-$ServerUpdateButton.Text = "Server Update"
-$ServerUpdateButton.Location = New-Object Drawing.Point(150, 350)
+$ServerUpdateButton.Text = "Update Server"
+$ServerUpdateButton.Location = New-Object Drawing.Point(150, 400)
 $Form.Controls.Add($ServerUpdateButton)
 
 # Start Server Button
 $StartServerButton = New-Object Windows.Forms.Button
 $StartServerButton.Text = "Start Server"
-$StartServerButton.Location = New-Object Drawing.Point(250, 350)
+$StartServerButton.Location = New-Object Drawing.Point(250, 400)
 $Form.Controls.Add($StartServerButton)
 
 # Function to update the GUI elements with the loaded configuration data
@@ -180,6 +204,8 @@ function Update-GUIFromConfig {
     $PortTextBox.Text = $Port
     $QueryPortTextBox.Text = $QueryPort
     $BattleEyeComboBox.SelectedItem = $BattleEye
+    $AdminPasswordTextBox.Text = $AdminPassword
+    $PasswordTextBox.Text = $Password
 }
 
 # Read the configuration data from the file, if available
@@ -200,6 +226,8 @@ $AppID = $ConfigData.AppID
 $Port = $ConfigData.Port
 $QueryPort = $ConfigData.QueryPort
 $BattleEye = $ConfigData.BattleEye
+$AdminPassword = $ConfigData.AdminPassword
+$Password = $ConfigData.Password
 
 # Read the configuration data from the file, if available
 if (Test-Path -Path $ScriptConfig) {
@@ -224,6 +252,8 @@ function Start-ARKServer {
     $Port = $ConfigData.Port
     $QueryPort = $ConfigData.QueryPort
     $BattleEye = $ConfigData.BattleEye
+    $AdminPassword = $ConfigData.AdminPassword
+    $Password = $ConfigData.Password
 
     # Trim the variables to remove spaces
     $ServerMAP = $ServerMAP.Trim()
@@ -233,9 +263,10 @@ function Start-ARKServer {
     $MaxPlayers = $MaxPlayers.Trim()
     $BattleEye = $BattleEye.Trim()
     
+  
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?MaxPlayers={4} -{5}', $ServerMAP, $ServerName, $Port, $QueryPort, $MaxPlayers, $BattleEye)
-    
+    $ServerArguments = [System.String]::Format('{0}?listen?Port={1}?QueryPort={2}?SessionName="{3}"?ServerPassword="{4}"?ServerAdminPassword="{5}" -{6}', $ServerMAP, $Port, $QueryPort, $ServerName, $Password, $AdminPassword, $BattleEye)
+
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
     
