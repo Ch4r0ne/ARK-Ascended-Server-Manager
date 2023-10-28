@@ -324,6 +324,7 @@ function Install-ARKServer {
     $SteamCMD = ""
     $TargetPath = ""
     $SteamCMDExecutable = ""
+    $TempPath = ""
     $SteamCMD = $ConfigData.SteamCMD
     $ARKServerPath = $ConfigData.ARKServerPath
     $ServerMAP = $ConfigData.ServerMAP
