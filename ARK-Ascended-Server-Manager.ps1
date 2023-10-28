@@ -225,11 +225,29 @@ function Start-ARKServer {
     $QueryPort = $ConfigData.QueryPort
     $BattleEye = $ConfigData.BattleEye
 
-    # Start server
+    # Trim the variables to remove spaces
+    $ServerMAP = $ServerMAP.Trim()
+    $ServerName = $ServerName.Trim()
+    $Port = $Port.Trim()
+    $QueryPort = $QueryPort.Trim()
+    $MaxPlayers = $MaxPlayers.Trim()
+    $BattleEye = $BattleEye.Trim()
+    
+    # Create the ServerArguments string with formatting
+    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?MaxPlayers={4} -{5}', $ServerMAP, $ServerName, $Port, $QueryPort, $MaxPlayers, $BattleEye)
+    
+    # Check the ServerArguments string
+    Write-Output "ServerArguments: $ServerArguments"
+    
+    # Start the server
     $ServerPath = Join-Path -Path $ARKServerPath -ChildPath "ShooterGame\Binaries\Win64\ArkAscendedServer.exe"
-    $ServerArguments = "'$ServerMAP'?listen?SessionName=""'$ServerName'""?Port='$Port'?QueryPort='$QueryPort'?MaxPlayers='$MaxPlayers' -'$BattleEye'"
-                   
-    Start-Process -FilePath $ServerPath -ArgumentList $ServerArguments -NoNewWindow
+    
+    if (-not [string]::IsNullOrWhiteSpace($ServerArguments)) {
+        Start-Process -FilePath $ServerPath -ArgumentList $ServerArguments -NoNewWindow
+    } else {
+        Write-Output "Error: ServerArguments are null or spaces."
+    }
+
 }
 # Call the function when the "Start Server" button is clicked.
 $StartServerButton.Add_Click({
