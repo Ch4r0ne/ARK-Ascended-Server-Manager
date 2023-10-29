@@ -116,7 +116,7 @@ $Form.Controls.Add($PortLabel)
 $PortTextBox = New-Object Windows.Forms.TextBox
 $PortTextBox.Location = New-Object Drawing.Point(200, 230)
 $PortTextBox.Size = New-Object Drawing.Size(50, 20)
-$PortTextBox.Text = "7777"
+$PortTextBox.Text = "27025"
 $Form.Controls.Add($PortTextBox)
 
 # QueryPort
@@ -128,7 +128,7 @@ $Form.Controls.Add($QueryPortLabel)
 $QueryPortTextBox = New-Object Windows.Forms.TextBox
 $QueryPortTextBox.Location = New-Object Drawing.Point(200, 260)
 $QueryPortTextBox.Size = New-Object Drawing.Size(50, 20)
-$QueryPortTextBox.Text = "27015"
+$QueryPortTextBox.Text = "27026"
 $Form.Controls.Add($QueryPortTextBox)
 
 # BattleEye
