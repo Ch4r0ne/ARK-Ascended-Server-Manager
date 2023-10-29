@@ -326,6 +326,7 @@ function Install-ARKServer {
     $TargetPath = ""
     $SteamCMDExecutable = ""
     $TempPath = ""
+    $downloadPath = ""
     $SteamCMD = $ConfigData.SteamCMD
     $ARKServerPath = $ConfigData.ARKServerPath
     $ServerMAP = $ConfigData.ServerMAP
@@ -369,7 +370,7 @@ function Install-ARKServer {
     Write-Output "SteamCMD has been successfully downloaded, installed, and saved in the target folder: $TargetPath"
 
     # Pfad Download-Folder
-	$downloadPath = $env:TEMP
+    $downloadPath = $env:TEMP
 
     # URL Visual C++ Redistributable-Download
     $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
