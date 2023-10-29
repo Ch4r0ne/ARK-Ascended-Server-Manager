@@ -4,10 +4,11 @@ ARK Survival Ascended Server Manager
 ![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview.png)
 
 ## Update: You need to port forward the folowing Ports
-7777 TCP/UDP
-8888 TCP/UDP
-Port = 27025 TCP/UDP
-QueryPort= 27026 TCP/UDP
+TCP/UDP 7777
+8888
+For Example:
+Port = 27025
+QueryPort= 27026
 
 ## 🔍 Found a Bug? Help Us Improve!
 
