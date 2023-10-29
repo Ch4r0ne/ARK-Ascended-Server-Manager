@@ -265,7 +265,8 @@ function Start-ARKServer {
     
   
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('{0}?listen?Port={1}?QueryPort={2}?SessionName="{3}"?ServerPassword="{4}"?ServerAdminPassword="{5}" -{6}', $ServerMAP, $Port, $QueryPort, $ServerName, $Password, $AdminPassword, $BattleEye)
+    $ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}" -{6}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $BattleEye)
+
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
@@ -368,7 +369,7 @@ function Install-ARKServer {
     Write-Output "SteamCMD has been successfully downloaded, installed, and saved in the target folder: $TargetPath"
 
     # Pfad Download-Folder
-    $downloadPath = "%Temp%"
+	$downloadPath = $env:TEMP
 
     # URL Visual C++ Redistributable-Download
     $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
