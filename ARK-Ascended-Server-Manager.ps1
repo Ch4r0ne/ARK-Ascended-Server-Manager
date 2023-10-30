@@ -159,15 +159,15 @@ $PortTextBox.Size = New-Object Drawing.Size(50, 20)
 $Form.Controls.Add($PortTextBox)
 
 # QueryPort
-$QueryPortLabel = New-Object Windows.Forms.Label
-$QueryPortLabel.Text = "Query Port:"
-$QueryPortLabel.Location = New-Object Drawing.Point(50, 260)
-$Form.Controls.Add($QueryPortLabel)
+# $QueryPortLabel = New-Object Windows.Forms.Label
+# $QueryPortLabel.Text = "Query Port:"
+# $QueryPortLabel.Location = New-Object Drawing.Point(50, 260)
+# $Form.Controls.Add($QueryPortLabel)
 
-$QueryPortTextBox = New-Object Windows.Forms.TextBox
-$QueryPortTextBox.Location = New-Object Drawing.Point(200, 260)
-$QueryPortTextBox.Size = New-Object Drawing.Size(50, 20)
-$Form.Controls.Add($QueryPortTextBox)
+# $QueryPortTextBox = New-Object Windows.Forms.TextBox
+# $QueryPortTextBox.Location = New-Object Drawing.Point(200, 260)
+# $QueryPortTextBox.Size = New-Object Drawing.Size(50, 20)
+# $Form.Controls.Add($QueryPortTextBox)
 
 # BattleEye
 $BattleEyeLabel = New-Object Windows.Forms.Label
@@ -193,15 +193,15 @@ $AdminPasswordTextBox.Size = New-Object Drawing.Size(150, 20)
 $Form.Controls.Add($AdminPasswordTextBox)
 
 # Mods
-$ModsLabel = New-Object Windows.Forms.Label
-$ModsLabel.Text = "Mods:"
-$ModsLabel.Location = New-Object Drawing.Point(50, 350)
-$Form.Controls.Add($ModsLabel)
+# $ModsLabel = New-Object Windows.Forms.Label
+# $ModsLabel.Text = "Mods:"
+# $ModsLabel.Location = New-Object Drawing.Point(50, 350)
+# $Form.Controls.Add($ModsLabel)
 
-$ModsTextBox = New-Object Windows.Forms.TextBox
-$ModsTextBox.Location = New-Object Drawing.Point(200, 350)
-$ModsTextBox.Size = New-Object Drawing.Size(150, 20)
-$Form.Controls.Add($ModsTextBox)
+# $ModsTextBox = New-Object Windows.Forms.TextBox
+# $ModsTextBox.Location = New-Object Drawing.Point(200, 350)
+# $ModsTextBox.Size = New-Object Drawing.Size(150, 20)
+# $Form.Controls.Add($ModsTextBox)
 
 # Password
 $PasswordLabel = New-Object Windows.Forms.Label
@@ -298,7 +298,7 @@ function Start-ARKServer {
     $ServerMAP = $ServerMAP.Trim()
     $ServerName = $ServerName.Trim()
     $Port = $Port.Trim()
-    $QueryPort = $QueryPort.Trim()
+    # $QueryPort = $QueryPort.Trim()
     $MaxPlayers = $MaxPlayers.Trim()
     $BattleEye = $BattleEye.Trim()
 
