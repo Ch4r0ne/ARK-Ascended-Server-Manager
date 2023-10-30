@@ -1,7 +1,7 @@
 # ARK-Ascended-Server-Manager
 ARK Survival Ascended Server Manager
 
-![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview.png)
+![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
 
 ## Update: You need to port forward the folowing Ports
 TCP/UDP 7777
