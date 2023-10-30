@@ -217,7 +217,7 @@ $Form.Controls.Add($PasswordTextBox)
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
 $InstallButton.Location = New-Object Drawing.Point(50, 400)
-$buttonInstall.Size = New-Object Drawing.Size(80, 30)
+$InstallButton.Size = New-Object Drawing.Size(80, 30)
 $InstallButton.Text = "Install"
 $Form.Controls.Add($InstallButton)
 $InstallButton.Add_Click({
@@ -228,7 +228,7 @@ $InstallButton.Add_Click({
 # Server Update Button
 $ServerUpdateButton = New-Object Windows.Forms.Button
 $ServerUpdateButton.Location = New-Object Drawing.Point(150, 400)
-$buttonInstall.Size = New-Object Drawing.Size(80, 30)
+$ServerUpdateButton.Size = New-Object Drawing.Size(80, 30)
 $ServerUpdateButton.Text = "Update"
 $Form.Controls.Add($ServerUpdateButton)
 $ServerUpdateButton.Add_Click({
@@ -238,7 +238,7 @@ $ServerUpdateButton.Add_Click({
 
 # Start Server Button
 $StartServerButton = New-Object Windows.Forms.Button
-$buttonInstall.Size = New-Object Drawing.Size(80, 30)
+$StartServerButton.Size = New-Object Drawing.Size(80, 30)
 $StartServerButton.Location = New-Object Drawing.Point(250, 400)
 $StartServerButton.Text = "Start"
 $Form.Controls.Add($StartServerButton)
