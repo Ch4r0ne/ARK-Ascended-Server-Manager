@@ -11,7 +11,7 @@ This script simplifies the server management process, offering a streamlined int
 ## Build for Windows Server 2022 / 2019
 Run the Skript as Administrator:
 
-![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
+![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview.png)
 
 ## Update: Port forward Ports
 - TCP/UDP 7777
