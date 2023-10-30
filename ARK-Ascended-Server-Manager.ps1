@@ -1,15 +1,30 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Create configuration file in the AppData folder
-$ConfigFolderPath = Join-Path $env:APPDATA "ARK-Ascended-Server-Manager"
+# Define default values
+$DefaultConfig = @{
+    SteamCMD = "C:\GameServer\SteamCMD"
+    ARKServerPath = "C:\GameServer\ARK-Survival-Ascended-Server"
+    ServerMAP = "TheIsland_WP"
+    ServerName = ""
+    MaxPlayers = "20"
+    AppID = "2430930"
+    Port = "27025"
+    QueryPort = "27026"
+    BattleEye = "NoBattlEye"
+    AdminPassword = ""
+    Password = ""
+}
 
-# If the folder does not exist, create it
+# Create configuration folder and file if not exists
+$ConfigFolderPath = Join-Path $env:APPDATA "ARK-Ascended-Server-Manager"
+$ScriptConfig = Join-Path $ConfigFolderPath "Config.json"
+
 if (-not (Test-Path -Path $ConfigFolderPath)) {
     New-Item -Path $ConfigFolderPath -ItemType Directory -Force
 }
 
-# Function for saving the configuration file
+# Function to save configuration to file
 function Save-Config {
     $ConfigData = @{
         SteamCMD = $SteamCMDPathTextBox.Text
@@ -27,15 +42,41 @@ function Save-Config {
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
 
+# Load configuration from file or set default values
+if (Test-Path -Path $ScriptConfig) {
+    try {
+        $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
+        foreach ($key in $DefaultConfig.Keys) {
+            if (-not $ConfigData.PSObject.Properties[$key]) {
+                $ConfigData | Add-Member -MemberType NoteProperty -Name $key -Value $DefaultConfig[$key]
+            }
+        }
+    } catch {
+        Write-Output "Fehler beim Lesen der Konfigurationsdatei. Standardkonfiguration wird verwendet."
+        $ConfigData = $DefaultConfig
+    }
+} else {
+    Write-Output "Keine Konfigurationsdatei gefunden. Standardkonfiguration wird verwendet."
+    $ConfigData = $DefaultConfig
+}
+
+# Use configuration data
+$SteamCMD = $ConfigData.SteamCMD
+$ARKServerPath = $ConfigData.ARKServerPath
+$ServerMAP = $ConfigData.ServerMAP
+$ServerName = $ConfigData.ServerName
+$MaxPlayers = $ConfigData.MaxPlayers
+$AppID = $ConfigData.AppID
+$Port = $ConfigData.Port
+$QueryPort = $ConfigData.QueryPort
+$BattleEye = $ConfigData.BattleEye
+$AdminPassword = $ConfigData.AdminPassword
+$Password = $ConfigData.Password
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
 $Form.Text = "ARK-Ascended-Server-Manager"
 $Form.Size = New-Object Drawing.Size(600, 500)
-
-# Script Config
-$ScriptConfig = Join-Path $env:APPDATA "ARK-Ascended-Server-Manager\Ark_Survival_Ascended_Config.json"
-
 
 # SteamCMD path
 $SteamCMDLabel = New-Object Windows.Forms.Label
@@ -57,7 +98,6 @@ $Form.Controls.Add($ARKServerLabel)
 $ARKServerPathTextBox = New-Object Windows.Forms.TextBox
 $ARKServerPathTextBox.Location = New-Object Drawing.Point(200, 80)
 $ARKServerPathTextBox.Size = New-Object Drawing.Size(300, 20)
-$ARKServerPathTextBox.Text = "C:\ArkServer"
 $Form.Controls.Add($ARKServerPathTextBox)
 
 # Server MAP
@@ -69,7 +109,6 @@ $Form.Controls.Add($ServerMAPLabel)
 $ServerMAPTextBox = New-Object Windows.Forms.TextBox
 $ServerMAPTextBox.Location = New-Object Drawing.Point(200, 110)
 $ServerMAPTextBox.Size = New-Object Drawing.Size(300, 20)
-$ServerMAPTextBox.Text = "TheIsland_WP"
 $Form.Controls.Add($ServerMAPTextBox)
 
 # Server Name
@@ -92,7 +131,6 @@ $Form.Controls.Add($MaxPlayersLabel)
 $MaxPlayersTextBox = New-Object Windows.Forms.TextBox
 $MaxPlayersTextBox.Location = New-Object Drawing.Point(200, 170)
 $MaxPlayersTextBox.Size = New-Object Drawing.Size(50, 20)
-$MaxPlayersTextBox.Text = "20"
 $Form.Controls.Add($MaxPlayersTextBox)
 
 # AppID
@@ -104,7 +142,6 @@ $Form.Controls.Add($AppIDLabel)
 $AppIDTextBox = New-Object Windows.Forms.TextBox
 $AppIDTextBox.Location = New-Object Drawing.Point(200, 200)
 $AppIDTextBox.Size = New-Object Drawing.Size(50, 20)
-$AppIDTextBox.Text = "2430930"
 $Form.Controls.Add($AppIDTextBox)
 
 # Port
@@ -116,7 +153,6 @@ $Form.Controls.Add($PortLabel)
 $PortTextBox = New-Object Windows.Forms.TextBox
 $PortTextBox.Location = New-Object Drawing.Point(200, 230)
 $PortTextBox.Size = New-Object Drawing.Size(50, 20)
-$PortTextBox.Text = "27025"
 $Form.Controls.Add($PortTextBox)
 
 # QueryPort
@@ -128,7 +164,6 @@ $Form.Controls.Add($QueryPortLabel)
 $QueryPortTextBox = New-Object Windows.Forms.TextBox
 $QueryPortTextBox.Location = New-Object Drawing.Point(200, 260)
 $QueryPortTextBox.Size = New-Object Drawing.Size(50, 20)
-$QueryPortTextBox.Text = "27026"
 $Form.Controls.Add($QueryPortTextBox)
 
 # BattleEye
@@ -170,15 +205,9 @@ $InstallButton = New-Object Windows.Forms.Button
 $InstallButton.Text = "Install"
 $InstallButton.Location = New-Object Drawing.Point(50, 400)
 $Form.Controls.Add($InstallButton)
-
-# Config Update Button
-$ConfigUpdateButton = New-Object Windows.Forms.Button
-$ConfigUpdateButton.Text = "WR Config"
-$ConfigUpdateButton.Location = New-Object Drawing.Point(350, 400)
-$Form.Controls.Add($ConfigUpdateButton)
-$ConfigUpdateButton.Add_Click({
+$InstallButton.Add_Click({
     Save-Config
-    [Windows.Forms.MessageBox]::Show("Konfig wurde aktualisiert.", "Erfolg", [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)
+	Update-Config
 })
 
 # Server Update Button
@@ -186,12 +215,20 @@ $ServerUpdateButton = New-Object Windows.Forms.Button
 $ServerUpdateButton.Text = "Update Server"
 $ServerUpdateButton.Location = New-Object Drawing.Point(150, 400)
 $Form.Controls.Add($ServerUpdateButton)
+$ServerUpdateButton.Add_Click({
+    Save-Config
+	Update-Config
+})
 
 # Start Server Button
 $StartServerButton = New-Object Windows.Forms.Button
 $StartServerButton.Text = "Start Server"
 $StartServerButton.Location = New-Object Drawing.Point(250, 400)
 $Form.Controls.Add($StartServerButton)
+$StartServerButton.Add_Click({
+    Save-Config
+	Update-Config
+})
 
 # Function to update the GUI elements with the loaded configuration data
 function Update-GUIFromConfig {
@@ -208,52 +245,36 @@ function Update-GUIFromConfig {
     $PasswordTextBox.Text = $Password
 }
 
-# Read the configuration data from the file, if available
+# Load configuration from file or set default values
 if (Test-Path -Path $ScriptConfig) {
-    $ConfigData = Get-Content -Path $ScriptConfig | ConvertFrom-Json -ErrorAction SilentlyContinue
+    try {
+        $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
+        foreach ($key in $DefaultConfig.Keys) {
+            if (-not $ConfigData.PSObject.Properties[$key]) {
+                $ConfigData | Add-Member -MemberType NoteProperty -Name $key -Value $DefaultConfig[$key]
+            }
+        }
+        # Update GUI with config data
+        Update-GUIFromConfig
+    } catch {
+        Write-Output "Error reading the configuration file. Default configuration is used."
+        $ConfigData = $DefaultConfig
+    }
 } else {
-    Write-Output "Keine Konfigurationsdatei gefunden. Konfigurationsdaten werden nicht geladen."
-}
-
-
-# Use the read data
-$SteamCMD = $ConfigData.SteamCMD
-$ARKServerPath = $ConfigData.ARKServerPath
-$ServerMAP = $ConfigData.ServerMAP
-$ServerName = $ConfigData.ServerName
-$MaxPlayers = $ConfigData.MaxPlayers
-$AppID = $ConfigData.AppID
-$Port = $ConfigData.Port
-$QueryPort = $ConfigData.QueryPort
-$BattleEye = $ConfigData.BattleEye
-$AdminPassword = $ConfigData.AdminPassword
-$Password = $ConfigData.Password
-
-# Read the configuration data from the file, if available
-if (Test-Path -Path $ScriptConfig) {
-    $ConfigData = Get-Content -Path $ScriptConfig | ConvertFrom-Json -ErrorAction SilentlyContinue
-
-    # Update the GUI elements with the loaded configuration data
+    Write-Output "No configuration file found. Default configuration is used."
+    $ConfigData = $DefaultConfig
+    # Update GUI with default config data
     Update-GUIFromConfig
-} else {
-    Write-Output "Keine Konfigurationsdatei gefunden. GUI-Elemente werden nicht aktualisiert."
 }
-
 
 # Function to start the ARK server
 function Start-ARKServer {
-    # Use the read data
-    $SteamCMD = $ConfigData.SteamCMD
-    $ARKServerPath = $ConfigData.ARKServerPath
-    $ServerMAP = $ConfigData.ServerMAP
-    $ServerName = $ConfigData.ServerName
-    $MaxPlayers = $ConfigData.MaxPlayers
-    $AppID = $ConfigData.AppID
-    $Port = $ConfigData.Port
-    $QueryPort = $ConfigData.QueryPort
-    $BattleEye = $ConfigData.BattleEye
-    $AdminPassword = $ConfigData.AdminPassword
-    $Password = $ConfigData.Password
+
+    # Update configuration settings
+    Update-Config
+
+    # Read the data from the configuration file
+    $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
 
     # Trim the variables to remove spaces
     $ServerMAP = $ServerMAP.Trim()
@@ -262,25 +283,23 @@ function Start-ARKServer {
     $QueryPort = $QueryPort.Trim()
     $MaxPlayers = $MaxPlayers.Trim()
     $BattleEye = $BattleEye.Trim()
-    
-  
-    # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}" -{6}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $BattleEye)
 
+    # Create the ServerArguments string with formatting
+    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}" -{7}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $BattleEye)
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
-    
+
     # Start the server
     $ServerPath = Join-Path -Path $ARKServerPath -ChildPath "ShooterGame\Binaries\Win64\ArkAscendedServer.exe"
-    
+
     if (-not [string]::IsNullOrWhiteSpace($ServerArguments)) {
         Start-Process -FilePath $ServerPath -ArgumentList $ServerArguments -NoNewWindow
     } else {
-        Write-Output "Error: ServerArguments are null or spaces."
+        Write-Output "Fehler: ServerArguments are null or spaces."
     }
-
 }
+
 # Call the function when the "Start Server" button is clicked.
 $StartServerButton.Add_Click({
     Start-ARKServer
@@ -288,16 +307,12 @@ $StartServerButton.Add_Click({
 
 # Function to update the ARK server
 function Update-ARKServer {
-    # Use the read data
-    $SteamCMD = $ConfigData.SteamCMD
-    $ARKServerPath = $ConfigData.ARKServerPath
-    $ServerMAP = $ConfigData.ServerMAP
-    $ServerName = $ConfigData.ServerName
-    $MaxPlayers = $ConfigData.MaxPlayers
-    $AppID = $ConfigData.AppID
-    $Port = $ConfigData.Port
-    $QueryPort = $ConfigData.QueryPort
-    $BattleEye = $ConfigData.BattleEye
+
+    # Update configuration settings
+    Update-Config
+
+    # Read the data from the configuration file
+    $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
 
     Start-Process -FilePath $SteamCMD\SteamCMD\steamcmd.exe -ArgumentList "+force_install_dir $ARKServerPath +login anonymous +app_update $AppID +quit" -Wait
 
@@ -307,124 +322,94 @@ $ServerUpdateButton.Add_Click({
     Update-ARKServer
 })
 
-# Function to update the configuration file
+# Funktion zum Aktualisieren der Konfigurationsdatei
 function Update-Config {
-    # Read the variables from the GUI elements and save them in the configuration file
+    # Lesen der Variablen aus den GUI-Elementen und in der Konfigurationsdatei speichern
+    $ConfigData.SteamCMD = $SteamCMDPathTextBox.Text
+    $ConfigData.ARKServerPath = $ARKServerPathTextBox.Text
+    $ConfigData.ServerMAP = $ServerMAPTextBox.Text
+    $ConfigData.ServerName = $ServerNameTextBox.Text
+    $ConfigData.MaxPlayers = $MaxPlayersTextBox.Text
+    $ConfigData.AppID = $AppIDTextBox.Text
+    $ConfigData.Port = $PortTextBox.Text
+    $ConfigData.QueryPort = $QueryPortTextBox.Text
+    $ConfigData.BattleEye = $BattleEyeComboBox.SelectedItem.ToString()
+    $ConfigData.AdminPassword = $AdminPasswordTextBox.Text
+    $ConfigData.Password = $PasswordTextBox.Text
+
     Save-Config
 }
-# Call the function when the "Config Update" button is clicked.
-$ConfigUpdateButton.Add_Click({
-    Update-Config
-})
 
 # Function for installing the ARK server
 function Install-ARKServer {
+    try {
 
-    Update-Config
+        $SteamCMD = ""
+        $TargetPath = ""
+        $SteamCMDExecutable = ""
+        $TempPath = ""
+        $downloadPath = ""
 
-    $SteamCMD = ""
-    $TargetPath = ""
-    $SteamCMDExecutable = ""
-    $TempPath = ""
-    $downloadPath = ""
-    $SteamCMD = $ConfigData.SteamCMD
-    $ARKServerPath = $ConfigData.ARKServerPath
-    $ServerMAP = $ConfigData.ServerMAP
-    $ServerName = $ConfigData.ServerName
-    $MaxPlayers = $ConfigData.MaxPlayers
-    $AppID = $ConfigData.AppID
-    $Port = $ConfigData.Port
-    $QueryPort = $ConfigData.QueryPort
-    $BattleEye = $ConfigData.BattleEye
+        # Update configuration settings
+        Update-Config
+		
+		# Read the data from the configuration file
+		$ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
+		
 
-    # The SteamCMD folder is created in the directory where the script is run
-    $TargetPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD"
 
-    # Create the destination folder if it does not exist
-    if (-not (Test-Path -Path $TargetPath)) {
-        New-Item -Path $TargetPath -ItemType Directory -Force
-    }
+        # Define paths and URLs
+        $SteamCMD = $ConfigData.SteamCMD
+        $TargetPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD"
+        $SteamCMDURL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
+        $downloadPath = $env:TEMP
+        $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        $directXUrl = "https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
 
-    # URL for SteamCMD download
-    $SteamCMDURL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
-
-    # Define the path where the SteamCMD zip file will be temporarily saved
-    $TempPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "steamcmd.zip")
-
-    # Download the SteamCMD zip file
-    Invoke-WebRequest -Uri $SteamCMDURL -OutFile $TempPath
-
-    # Extract the SteamCMD zip file to the target folder
-    Expand-Archive -Path $TempPath -DestinationPath $TargetPath -Force
-
-    # Delete the temporary SteamCMD zip file
-    Remove-Item -Path $TempPath -Force
-
-    # Define the path for the SteamCMD executable
-    $SteamCMDExecutable = Join-Path -Path $TargetPath -ChildPath "steamcmd.exe"
-
-    # Run the SteamCMD installer
-    Start-Process -FilePath $SteamCMDExecutable -ArgumentList @("+quit") -Wait
-
-    # Output a confirmation message
-    Write-Output "SteamCMD has been successfully downloaded, installed, and saved in the target folder: $TargetPath"
-
-    # Pfad Download-Folder
-    $downloadPath = $env:TEMP
-
-    # URL Visual C++ Redistributable-Download
-    $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-
-    # URL DirectX Runtime-Download
-    $directXUrl = "https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
-
-    # Überprüfen, ob Download-Verzeichnis vorhanden ist, andernfalls erstellen
-    if (!(Test-Path -Path $downloadPath -PathType Container)) {
-        New-Item -Path $downloadPath -ItemType Directory -Force
-    }
-
-    # Download Visual C++ Redistributable
-    Write-Output "Lade Visual C++ Redistributable herunter..."
-    Invoke-WebRequest -Uri $vcRedistUrl -OutFile "$downloadPath\vc_redist.x64.exe"
-
-    # Download DirectX Runtime
-    Write-Output "Lade DirectX Runtime herunter..."
-    Invoke-WebRequest -Uri $directXUrl -OutFile "$downloadPath\dxwebsetup.exe"
-
-    # Check if Visual C++ Redistributable is already installed
-    if (!(Get-ItemProperty -Path "HKLM:\Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue)) {
-        Write-Output "Visual C++ Redistributable nicht gefunden. Starte die Installation..."
-        $vcRedistPath = "$downloadPath\vc_redist.x64.exe"
-        $vcRedistProcess = Start-Process -FilePath $vcRedistPath -ArgumentList "/install", "/quiet", "/norestart" -PassThru -Wait
-        if ($vcRedistProcess.ExitCode -eq 0) {
-            Write-Output "Visual C++ Redistributable wurde erfolgreich installiert."
-        } else {
-            Write-Output "Fehler bei der Installation von Visual C++ Redistributable. Exit-Code: $($vcRedistProcess.ExitCode)"
+        # Function to handle installations
+        function Install-Component($url, $outputFile, $arguments) {
+            Write-Output "Starte Installation von $outputFile..."
+            Invoke-WebRequest -Uri $url -OutFile "$downloadPath\$outputFile"
+            $process = Start-Process -FilePath "$downloadPath\$outputFile" -ArgumentList $arguments -PassThru -Wait
+            if ($process.ExitCode -eq 0) {
+                Write-Output "$outputFile was successfully installed."
+            } else {
+                throw "Error during the installation of $outputFile. Exit-Code: $($process.ExitCode)"
+            }
         }
-    } else {
-        Write-Output "Visual C++ Redistributable bereits installiert."
-    }
 
-    # Check whether DirectX Runtime is already installed
-    if (!(Test-Path "HKLM:\Software\Microsoft\DirectX" -ErrorAction SilentlyContinue)) {
-        Write-Output "DirectX Runtime nicht gefunden. Starte die Installation..."
-        $directXPath = "$downloadPath\dxwebsetup.exe"
-        $directXProcess = Start-Process -FilePath $directXPath -ArgumentList "/silent" -PassThru -Wait
-        if ($directXProcess.ExitCode -eq 0) {
-            Write-Output "DirectX Runtime wurde erfolgreich installiert."
+        # Install Visual C++ Redistributable if not already installed
+        if (!(Test-Path -Path "HKLM:\Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue)) {
+            Install-Component -url $vcRedistUrl -outputFile "vc_redist.x64.exe" -arguments "/install", "/quiet", "/norestart"
         } else {
-            Write-Output "Fehler bei der Installation von DirectX Runtime. Exit-Code: $($directXProcess.ExitCode)"
+            Write-Output "Visual C++ Redistributable already installed."
         }
-    } else {
-        Write-Output "DirectX Runtime bereits installiert."
+
+        # Install DirectX Runtime if not already installed
+        if (!(Test-Path "HKLM:\Software\Microsoft\DirectX" -ErrorAction SilentlyContinue)) {
+            Install-Component -url $directXUrl -outputFile "dxwebsetup.exe" -arguments "/silent"
+        } else {
+            Write-Output "DirectX Runtime already installed."
+        }
+
+        # Create the SteamCMD folder if it does not exist
+        if (-not (Test-Path -Path $TargetPath)) {
+            New-Item -Path $TargetPath -ItemType Directory -Force
+        }
+
+        # Download and install SteamCMD
+        Write-Output "Download SteamCMD and install ARK Server.."
+        Invoke-WebRequest -Uri $SteamCMDURL -OutFile "$downloadPath\steamcmd.zip"
+        Expand-Archive -Path "$downloadPath\steamcmd.zip" -DestinationPath $TargetPath -Force
+        $SteamCmdPath = Join-Path -Path $TargetPath -ChildPath "steamcmd.exe"
+        Start-Process -FilePath $SteamCmdPath -ArgumentList @("+force_install_dir", "$ARKServerPath", "+login", "anonymous", "+app_update", "$AppID", "+quit") -Wait
+
+        [System.Windows.Forms.MessageBox]::Show("ARK Server has been successfully installed.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("Error while installing the ARK server: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
-
-    # Define the path to the SteamCMD exe relative to the script directory
-    $SteamCmdPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD\steamcmd.exe"
-
-    # SteamCMD Installation und Update mit anonymem Account
-    Start-Process -FilePath $SteamCmdPath -ArgumentList "+force_install_dir $ARKServerPath +login anonymous +app_update $AppID +quit" -Wait
 }
+
 
 $InstallButton.Add_Click({
     Install-ARKServer
