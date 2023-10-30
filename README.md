@@ -9,7 +9,6 @@ This PowerShell script provides a user-friendly GUI for managing ARK Survival As
 This script simplifies the server management process, offering a streamlined interface for both novice and experienced users. Users can easily configure, install, update, and start ARK game servers without delving into complex command lines or configurations.
 
 ## Build for Windows Server 2022 / 2019
-Run the Skript as Administrator for the Install:
 
 ![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview.png)
 
