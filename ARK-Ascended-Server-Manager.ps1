@@ -256,11 +256,11 @@ function Update-GUIFromConfig {
     $MaxPlayersTextBox.Text = $MaxPlayers
     $AppIDTextBox.Text = $AppID
     $PortTextBox.Text = $Port
-    $QueryPortTextBox.Text = $QueryPort
+    # $QueryPortTextBox.Text = $QueryPort
     $BattleEyeComboBox.SelectedItem = $BattleEye
     $AdminPasswordTextBox.Text = $AdminPassword
     $PasswordTextBox.Text = $Password
-    $ModsTextBox.Text = $Mods
+    # $ModsTextBox.Text = $Mods
 }
 
 # Load configuration from file or set default values
