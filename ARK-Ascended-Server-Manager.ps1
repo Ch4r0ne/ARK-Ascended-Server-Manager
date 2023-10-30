@@ -14,6 +14,7 @@ $DefaultConfig = @{
     BattleEye = "NoBattlEye"
     AdminPassword = ""
     Password = ""
+    Mods= ""
 }
 
 # Create configuration folder and file if not exists
@@ -38,6 +39,7 @@ function Save-Config {
         BattleEye = $BattleEyeComboBox.SelectedItem.ToString()
         AdminPassword = $AdminPasswordTextBox.Text
         Password = $PasswordTextBox.Text
+        Mods = $ModsTextBox.Text
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -72,6 +74,7 @@ $QueryPort = $ConfigData.QueryPort
 $BattleEye = $ConfigData.BattleEye
 $AdminPassword = $ConfigData.AdminPassword
 $Password = $ConfigData.Password
+$Mods = $ConfigData.Mods
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
@@ -189,6 +192,17 @@ $AdminPasswordTextBox.Location = New-Object Drawing.Point(200, 320)
 $AdminPasswordTextBox.Size = New-Object Drawing.Size(150, 20)
 $Form.Controls.Add($AdminPasswordTextBox)
 
+# Mods
+$ModsLabel = New-Object Windows.Forms.Label
+$ModsLabel.Text = "Mods:"
+$ModsLabel.Location = New-Object Drawing.Point(50, 350)
+$Form.Controls.Add($ModsLabel)
+
+$ModsTextBox = New-Object Windows.Forms.TextBox
+$ModsTextBox.Location = New-Object Drawing.Point(200, 350)
+$ModsTextBox.Size = New-Object Drawing.Size(150, 20)
+$Form.Controls.Add($ModsTextBox)
+
 # Password
 $PasswordLabel = New-Object Windows.Forms.Label
 $PasswordLabel.Text = "Password:"
@@ -246,6 +260,7 @@ function Update-GUIFromConfig {
     $BattleEyeComboBox.SelectedItem = $BattleEye
     $AdminPasswordTextBox.Text = $AdminPassword
     $PasswordTextBox.Text = $Password
+    $ModsTextBox.Text = $Mods
 }
 
 # Load configuration from file or set default values
@@ -288,7 +303,7 @@ function Start-ARKServer {
     $BattleEye = $BattleEye.Trim()
 
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}" -{7}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $BattleEye)
+    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}" -{7} -mods={8}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $BattleEye, $Mods)
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
@@ -338,6 +353,7 @@ function Update-Config {
     $ConfigData.BattleEye = $BattleEyeComboBox.SelectedItem.ToString()
     $ConfigData.AdminPassword = $AdminPasswordTextBox.Text
     $ConfigData.Password = $PasswordTextBox.Text
+    $ConfigData.Mods = $ModsTextBox.Text
 
     # Update global variables with new values
     $script:SteamCMD = $ConfigData.SteamCMD
@@ -351,6 +367,7 @@ function Update-Config {
     $script:BattleEye = $ConfigData.BattleEye
     $script:AdminPassword = $ConfigData.AdminPassword
     $script:Password = $ConfigData.Password
+    $script:Mods = $ConfigData.Mods
 
     Save-Config
 }
