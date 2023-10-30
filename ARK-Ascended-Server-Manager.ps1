@@ -322,9 +322,8 @@ $ServerUpdateButton.Add_Click({
     Update-ARKServer
 })
 
-# Funktion zum Aktualisieren der Konfigurationsdatei
 function Update-Config {
-    # Lesen der Variablen aus den GUI-Elementen und in der Konfigurationsdatei speichern
+    # Reading the variables from the GUI elements and saving them in the configuration file
     $ConfigData.SteamCMD = $SteamCMDPathTextBox.Text
     $ConfigData.ARKServerPath = $ARKServerPathTextBox.Text
     $ConfigData.ServerMAP = $ServerMAPTextBox.Text
@@ -336,6 +335,19 @@ function Update-Config {
     $ConfigData.BattleEye = $BattleEyeComboBox.SelectedItem.ToString()
     $ConfigData.AdminPassword = $AdminPasswordTextBox.Text
     $ConfigData.Password = $PasswordTextBox.Text
+
+    # Update global variables with new values
+    $script:SteamCMD = $ConfigData.SteamCMD
+    $script:ARKServerPath = $ConfigData.ARKServerPath
+    $script:ServerMAP = $ConfigData.ServerMAP
+    $script:ServerName = $ConfigData.ServerName
+    $script:MaxPlayers = $ConfigData.MaxPlayers
+    $script:AppID = $ConfigData.AppID
+    $script:Port = $ConfigData.Port
+    $script:QueryPort = $ConfigData.QueryPort
+    $script:BattleEye = $ConfigData.BattleEye
+    $script:AdminPassword = $ConfigData.AdminPassword
+    $script:Password = $ConfigData.Password
 
     Save-Config
 }
