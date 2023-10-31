@@ -13,8 +13,8 @@ This script simplifies the server management process, offering a streamlined int
 ![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
 
 ## Port forward Ports
-- 7777 / 7778
-- Port =
+- UDP 7777 
+- TCP Port =
 
 ## Known Issue:
 https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/discussions/1
