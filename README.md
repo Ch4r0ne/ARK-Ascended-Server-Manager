@@ -14,7 +14,10 @@ This script simplifies the server management process, offering a streamlined int
 
 ## Port forward Ports
 - UDP 7777 
-- TCP Port = 27015 (default)
+- TCP QueryPort = 27025 (default 27015)
+
+- ```netsh advfirewall firewall add rule name="Ark port 7777 UDP" dir=in protocol=UDP localport=7777 action=allow```
+- ```netsh advfirewall firewall add rule name="Ark port 27025 TCP" dir=in protocol=TCP localport=27025 action=allow```
 
 ## Known Issue:
 I'm currently facing a persistent problem where the server isn't getting listed. I've been diligently working on resolving this, but unfortunately, a solution has eluded me thus far. The detailed discussion of the issue can be found at this link. https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/discussions/1
