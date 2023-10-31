@@ -15,6 +15,8 @@ $DefaultConfig = @{
     AdminPassword = ""
     Password = ""
     Mods= ""
+    RCONPort = "27020"
+    RCONEnabled = "False"
 }
 
 # Create configuration folder and file if not exists
@@ -40,6 +42,8 @@ function Save-Config {
         AdminPassword = $AdminPasswordTextBox.Text
         Password = $PasswordTextBox.Text
         Mods = $ModsTextBox.Text
+        RCONPort = $RCONPortTextBox.Text
+        RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -75,11 +79,13 @@ $BattleEye = $ConfigData.BattleEye
 $AdminPassword = $ConfigData.AdminPassword
 $Password = $ConfigData.Password
 $Mods = $ConfigData.Mods
+$RCONPort = $ConfigData.RCONPort
+$RCONEnabled = $ConfigData.RCONEnabled
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
 $Form.Text = "ARK-Ascended-Server-Manager"
-$Form.Size = New-Object Drawing.Size(600, 500)
+$Form.Size = New-Object Drawing.Size(600, 550)
 
 # SteamCMD path
 $SteamCMDLabel = New-Object Windows.Forms.Label
@@ -193,15 +199,15 @@ $AdminPasswordTextBox.Size = New-Object Drawing.Size(150, 20)
 $Form.Controls.Add($AdminPasswordTextBox)
 
 # Mods
-# $ModsLabel = New-Object Windows.Forms.Label
-# $ModsLabel.Text = "Mods:"
-# $ModsLabel.Location = New-Object Drawing.Point(50, 350)
-# $Form.Controls.Add($ModsLabel)
+$ModsLabel = New-Object Windows.Forms.Label
+$ModsLabel.Text = "Mods:"
+$ModsLabel.Location = New-Object Drawing.Point(50, 410)
+$Form.Controls.Add($ModsLabel)
 
-# $ModsTextBox = New-Object Windows.Forms.TextBox
-# $ModsTextBox.Location = New-Object Drawing.Point(200, 350)
-# $ModsTextBox.Size = New-Object Drawing.Size(150, 20)
-# $Form.Controls.Add($ModsTextBox)
+$ModsTextBox = New-Object Windows.Forms.TextBox
+$ModsTextBox.Location = New-Object Drawing.Point(200, 410)
+$ModsTextBox.Size = New-Object Drawing.Size(330, 20)
+$Form.Controls.Add($ModsTextBox)
 
 # Password
 $PasswordLabel = New-Object Windows.Forms.Label
@@ -214,37 +220,60 @@ $PasswordTextBox.Location = New-Object Drawing.Point(200, 350)
 $PasswordTextBox.Size = New-Object Drawing.Size(150, 20)
 $Form.Controls.Add($PasswordTextBox)
 
+# RCON Enabled
+$RCONEnabledLabel = New-Object Windows.Forms.Label
+$RCONEnabledLabel.Text = "RCON Enabled:"
+$RCONEnabledLabel.Location = New-Object Drawing.Point(50, 380)
+$Form.Controls.Add($RCONEnabledLabel)
+
+$RCONEnabledComboBox = New-Object Windows.Forms.ComboBox
+$RCONEnabledComboBox.Items.AddRange(@("True", "False"))
+$RCONEnabledComboBox.Location = New-Object Drawing.Point(200, 380)
+$RCONEnabledComboBox.SelectedItem = "False"
+$Form.Controls.Add($RCONEnabledComboBox)
+
+# RCON Port
+$RCONPortLabel = New-Object Windows.Forms.Label
+$RCONPortLabel.Text = "RCON Port:"
+$RCONPortLabel.Location = New-Object Drawing.Point(330, 385)
+$Form.Controls.Add($RCONPortLabel)
+
+$RCONPortTextBox = New-Object Windows.Forms.TextBox
+$RCONPortTextBox.Location = New-Object Drawing.Point(440, 382)
+$RCONPortTextBox.Size = New-Object Drawing.Size(50, 20)
+$Form.Controls.Add($RCONPortTextBox)
+
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
-$InstallButton.Location = New-Object Drawing.Point(50, 400)
+$InstallButton.Location = New-Object Drawing.Point(50, 450)
 $InstallButton.Size = New-Object Drawing.Size(80, 30)
 $InstallButton.Text = "Install"
 $Form.Controls.Add($InstallButton)
 $InstallButton.Add_Click({
     Save-Config
-	Update-Config
+    Update-Config
 })
 
 # Server Update Button
 $ServerUpdateButton = New-Object Windows.Forms.Button
-$ServerUpdateButton.Location = New-Object Drawing.Point(150, 400)
+$ServerUpdateButton.Location = New-Object Drawing.Point(180, 450)  # Adjusted button position
 $ServerUpdateButton.Size = New-Object Drawing.Size(80, 30)
 $ServerUpdateButton.Text = "Update"
 $Form.Controls.Add($ServerUpdateButton)
 $ServerUpdateButton.Add_Click({
     Save-Config
-	Update-Config
+    Update-Config
 })
 
 # Start Server Button
 $StartServerButton = New-Object Windows.Forms.Button
+$StartServerButton.Location = New-Object Drawing.Point(310, 450)  # Adjusted button position
 $StartServerButton.Size = New-Object Drawing.Size(80, 30)
-$StartServerButton.Location = New-Object Drawing.Point(250, 400)
 $StartServerButton.Text = "Start"
 $Form.Controls.Add($StartServerButton)
 $StartServerButton.Add_Click({
     Save-Config
-	Update-Config
+    Update-Config
 })
 
 # Function to update the GUI elements with the loaded configuration data
@@ -260,7 +289,10 @@ function Update-GUIFromConfig {
     $BattleEyeComboBox.SelectedItem = $BattleEye
     $AdminPasswordTextBox.Text = $AdminPassword
     $PasswordTextBox.Text = $Password
-    # $ModsTextBox.Text = $Mods
+    $ModsTextBox.Text = $Mods
+    $RCONPortTextBox.Text = $RCONPort
+    $RCONEnabledComboBox.SelectedItem = $RCONEnabled
+
 }
 
 # Load configuration from file or set default values
@@ -303,7 +335,7 @@ function Start-ARKServer {
     $BattleEye = $BattleEye.Trim()
 
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}" -{7}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $BattleEye)
+    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}"?RCONEnabled={7}?RCONPort={8} -mods={9}, -{10}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $Mods, $BattleEye)
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
@@ -354,6 +386,9 @@ function Update-Config {
     $ConfigData.AdminPassword = $AdminPasswordTextBox.Text
     $ConfigData.Password = $PasswordTextBox.Text
     $ConfigData.Mods = $ModsTextBox.Text
+    $ConfigData.RCONPort = $RCONPortTextBox.Text
+    $ConfigData.RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
+
 
     # Update global variables with new values
     $script:SteamCMD = $ConfigData.SteamCMD
@@ -368,6 +403,8 @@ function Update-Config {
     $script:AdminPassword = $ConfigData.AdminPassword
     $script:Password = $ConfigData.Password
     $script:Mods = $ConfigData.Mods
+    $script:RCONPort = $ConfigData.RCONPort
+    $script:RCONEnabled = $ConfigData.RCONEnabled
 
     Save-Config
 }
