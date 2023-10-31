@@ -335,7 +335,7 @@ function Start-ARKServer {
     $BattleEye = $BattleEye.Trim()
 
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}"?RCONEnabled={7}?RCONPort={8} -mods={9}, -{10}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $Mods, $BattleEye)
+    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}"?RCONEnabled={7}?RCONPort={8} -{9} -automanagedmods -mods={10},', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $BattleEye, $Mods)
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
