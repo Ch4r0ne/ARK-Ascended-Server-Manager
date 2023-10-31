@@ -9,8 +9,8 @@ $DefaultConfig = @{
     ServerName = ""
     MaxPlayers = "20"
     AppID = "2430930"
-    Port = "27025"
-    QueryPort = "27026"
+    Port = "7777"
+    QueryPort = "27025"
     BattleEye = "NoBattlEye"
     AdminPassword = ""
     Password = ""
@@ -159,15 +159,15 @@ $PortTextBox.Size = New-Object Drawing.Size(50, 20)
 $Form.Controls.Add($PortTextBox)
 
 # QueryPort
-# $QueryPortLabel = New-Object Windows.Forms.Label
-# $QueryPortLabel.Text = "Query Port:"
-# $QueryPortLabel.Location = New-Object Drawing.Point(50, 260)
-# $Form.Controls.Add($QueryPortLabel)
+$QueryPortLabel = New-Object Windows.Forms.Label
+$QueryPortLabel.Text = "Query Port:"
+$QueryPortLabel.Location = New-Object Drawing.Point(50, 260)
+$Form.Controls.Add($QueryPortLabel)
 
-# $QueryPortTextBox = New-Object Windows.Forms.TextBox
-# $QueryPortTextBox.Location = New-Object Drawing.Point(200, 260)
-# $QueryPortTextBox.Size = New-Object Drawing.Size(50, 20)
-# $Form.Controls.Add($QueryPortTextBox)
+$QueryPortTextBox = New-Object Windows.Forms.TextBox
+$QueryPortTextBox.Location = New-Object Drawing.Point(200, 260)
+$QueryPortTextBox.Size = New-Object Drawing.Size(50, 20)
+$Form.Controls.Add($QueryPortTextBox)
 
 # BattleEye
 $BattleEyeLabel = New-Object Windows.Forms.Label
@@ -256,7 +256,7 @@ function Update-GUIFromConfig {
     $MaxPlayersTextBox.Text = $MaxPlayers
     $AppIDTextBox.Text = $AppID
     $PortTextBox.Text = $Port
-    # $QueryPortTextBox.Text = $QueryPort
+    $QueryPortTextBox.Text = $QueryPort
     $BattleEyeComboBox.SelectedItem = $BattleEye
     $AdminPasswordTextBox.Text = $AdminPassword
     $PasswordTextBox.Text = $Password
@@ -298,7 +298,7 @@ function Start-ARKServer {
     $ServerMAP = $ServerMAP.Trim()
     $ServerName = $ServerName.Trim()
     $Port = $Port.Trim()
-    # $QueryPort = $QueryPort.Trim()
+    $QueryPort = $QueryPort.Trim()
     $MaxPlayers = $MaxPlayers.Trim()
     $BattleEye = $BattleEye.Trim()
 
