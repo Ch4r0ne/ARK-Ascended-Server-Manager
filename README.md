@@ -12,7 +12,7 @@ This script simplifies the server management process, offering a streamlined int
 
 ![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
 
-## Update: Port forward Ports
+## Port forward Ports
 - 7777 / 7778
 - Port =
 
