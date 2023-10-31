@@ -13,11 +13,15 @@ This script simplifies the server management process, offering a streamlined int
 ![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
 
 ## Port forward Ports
-- UDP 7777 
-- TCP QueryPort = 27025 (default 27015)
+- Port = 27015 - UDP 
+- QueryPort = 27016 - TCP
 
-- ```netsh advfirewall firewall add rule name="Ark port 7777 UDP" dir=in protocol=UDP localport=7777 action=allow```
-- ```netsh advfirewall firewall add rule name="Ark port 27025 TCP" dir=in protocol=TCP localport=27025 action=allow```
+```
+New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27015 -Protocol UDP -Action Allow
+New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol UDP -Action Allow
+New-NetFirewallRule -DisplayName "ASA Server" -Direction Outbound -LocalPort 27015 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "ASA Server" -Direction Outbound -LocalPort 27016 -Protocol UDP -Action Allow
+```
 
 ## Known Issue:
 I'm currently facing a persistent problem where the server isn't getting listed. I've been diligently working on resolving this, but unfortunately, a solution has eluded me thus far. The detailed discussion of the issue can be found at this link. https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/discussions/1
