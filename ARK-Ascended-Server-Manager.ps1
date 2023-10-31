@@ -9,8 +9,8 @@ $DefaultConfig = @{
     ServerName = ""
     MaxPlayers = "20"
     AppID = "2430930"
-    Port = "7777"
-    QueryPort = "27025"
+    Port = "27015"
+    QueryPort = "27016"
     BattleEye = "NoBattlEye"
     AdminPassword = ""
     Password = ""
@@ -58,11 +58,11 @@ if (Test-Path -Path $ScriptConfig) {
             }
         }
     } catch {
-        Write-Output "Fehler beim Lesen der Konfigurationsdatei. Standardkonfiguration wird verwendet."
+        Write-Output "Error reading configuration file. Default configuration is used."
         $ConfigData = $DefaultConfig
     }
 } else {
-    Write-Output "Keine Konfigurationsdatei gefunden. Standardkonfiguration wird verwendet."
+    Write-Output "No configuration file found. Default configuration is used."
     $ConfigData = $DefaultConfig
 }
 
