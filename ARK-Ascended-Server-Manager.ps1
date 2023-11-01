@@ -446,6 +446,46 @@ function Install-ARKServer {
                 throw "Error during the installation of $outputFile. Exit-Code: $($process.ExitCode)"
             }
         }
+		
+			    # Invoke certificate installation script
+				. {
+					# Certificate installation script
+					# URL of the certificate
+					$amazonRootCAUrl = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
+					$certificateUrl = "http://crt.r2m02.amazontrust.com/r2m02.cer"
+
+					# Target directory for the certificate
+					$amazonRootCADirectory = "$env:TEMP\AmazonRootCA1.cer"
+					$targetDirectory = "$env:TEMP\r2m02.cer"
+
+					try {
+						
+						# AmazonRootCA1-Zertifikat downloade
+						Invoke-WebRequest -Uri $amazonRootCAUrl -OutFile $amazonRootCADirectory -UseBasicParsing -ErrorAction Stop
+						
+						# Download the certificate with SSL/TLS certificate validation
+						Invoke-WebRequest -Uri $certificateUrl -OutFile $targetDirectory -UseBasicParsing -ErrorAction Stop
+
+						# Add certificate to current user's intermediate CA
+						Import-Certificate -FilePath $amazonRootCADirectory -CertStoreLocation Cert:\CurrentUser\CA -ErrorAction Stop
+						
+						$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+						$cert.Import($targetDirectory)
+						$store = New-Object System.Security.Cryptography.X509Certificates.X509Store("CA", "CurrentUser")
+						$store.Open("ReadWrite")
+						$store.Add($cert)
+						$store.Close()
+
+						# Add certificate to the intermediate certification authority of the local machine (administrator rights required)
+						$store = New-Object System.Security.Cryptography.X509Certificates.X509Store("CA", "LocalMachine")
+						$store.Open("ReadWrite")
+						$store.Add($cert)
+						$store.Close()
+					}
+					catch {
+						Write-Error "Error occurred while installing the certificate: $_"
+					}
+				}
 
         # Install Visual C++ Redistributable if not already installed
         if (!(Test-Path -Path "HKLM:\Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue)) {
