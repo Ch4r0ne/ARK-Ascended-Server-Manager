@@ -21,6 +21,21 @@ New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 2701
 New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol UDP -Action Allow
 ```
 
+## Roadmap
+
+### Main Features:
+- **RCON Sending**: Functionality to send commands via console in the GUI.
+- **Services Management**: Start / Stop / Update / Remove services.
+- **Auto Backup**: Create versions automatically upon each restart (service update).
+
+### Additional Features:
+- **Online Player Count and Status**: Display the number of online players.
+- **Update Checker**: Automatically check for updates.
+- **Discord Webhook Integration**: Input field and button for enabling/disabling Discord webhook.
+- **Force Stop**: Option to forcefully stop running processes.
+- **Edit Configuration Files**: Access and modify 'Game.ini' and 'GameUserSettings.ini'.
+
+
 ## 🔍 Found a Bug? Help Us Improve!
 Hello developers and early adopters! Welcome to our app's preview release. 
 Your feedback is crucial as we refine every detail. 
