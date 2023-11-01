@@ -17,6 +17,9 @@ $DefaultConfig = @{
     Mods= ""
     RCONPort = "27020"
     RCONEnabled = "False"
+    ForceRespawnDinos = $false  # Set the default value as a boolean
+    #ClusterDirOverride = ""
+    #clusterid = ""
 }
 
 # Create configuration folder and file if not exists
@@ -44,6 +47,9 @@ function Save-Config {
         Mods = $ModsTextBox.Text
         RCONPort = $RCONPortTextBox.Text
         RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
+        ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+        #ClusterDirOverride = $ClusterDirOverrideTextBox.Text
+        #clusterid = $ClusterIdTextBox.Text
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -81,11 +87,14 @@ $Password = $ConfigData.Password
 $Mods = $ConfigData.Mods
 $RCONPort = $ConfigData.RCONPort
 $RCONEnabled = $ConfigData.RCONEnabled
+$ForceRespawnDinos = $ConfigData.ForceRespawnDinos
+#$ClusterDirOverride = $ConfigData.ClusterDirOverride
+#$clusterid = $ConfigData.clusterid
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
 $Form.Text = "ARK-Ascended-Server-Manager"
-$Form.Size = New-Object Drawing.Size(600, 550)
+$Form.Size = New-Object Drawing.Size(600, 600)
 
 # SteamCMD path
 $SteamCMDLabel = New-Object Windows.Forms.Label
@@ -243,37 +252,101 @@ $RCONPortTextBox.Location = New-Object Drawing.Point(440, 382)
 $RCONPortTextBox.Size = New-Object Drawing.Size(50, 20)
 $Form.Controls.Add($RCONPortTextBox)
 
+# Force Respawn Dinos (Checkbox)
+$ForceRespawnDinosLabel = New-Object Windows.Forms.Label
+$ForceRespawnDinosLabel.Text = "Force Respawn Dinos:"
+$ForceRespawnDinosLabel.AutoSize = $true
+$ForceRespawnDinosLabel.Location = New-Object Drawing.Point(50, 440)
+$Form.Controls.Add($ForceRespawnDinosLabel)
+
+$ForceRespawnDinosCheckBox = New-Object Windows.Forms.CheckBox
+$ForceRespawnDinosCheckBox.Location = New-Object Drawing.Point(200, 440)
+$ForceRespawnDinosCheckBox.Size = New-Object Drawing.Size(20, 20)
+$Form.Controls.Add($ForceRespawnDinosCheckBox)
+
+
+# ClusterDirOverride (Textfeld)
+#$ClusterDirOverrideLabel = New-Object Windows.Forms.Label
+#$ClusterDirOverrideLabel.Text = "ClusterDirOverride"
+#$ClusterDirOverrideLabel.Location = New-Object Drawing.Point(50, 470)
+#$Form.Controls.Add($ClusterDirOverrideLabel)
+
+#$ClusterDirOverrideTextBox = New-Object Windows.Forms.TextBox
+#$ClusterDirOverrideTextBox.Location = New-Object Drawing.Point(200, 470)
+#$ClusterDirOverrideTextBox.Size = New-Object Drawing.Size(100, 20)
+#$Form.Controls.Add($ClusterDirOverrideTextBox)
+
+# clusterid (Textfeld)
+#$ClusterIdLabel = New-Object Windows.Forms.Label
+#$ClusterIdLabel.Text = "clusterid"
+#$ClusterIdLabel.Location = New-Object Drawing.Point(330, 470)
+#$Form.Controls.Add($ClusterIdLabel)
+
+#$ClusterIdTextBox = New-Object Windows.Forms.TextBox
+#$ClusterIdTextBox.Location = New-Object Drawing.Point(440, 470)
+#$ClusterIdTextBox.Size = New-Object Drawing.Size(100, 20)
+#$Form.Controls.Add($ClusterIdTextBox)
+
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
-$InstallButton.Location = New-Object Drawing.Point(50, 450)
+$InstallButton.Location = New-Object Drawing.Point(50, 500)
 $InstallButton.Size = New-Object Drawing.Size(80, 30)
 $InstallButton.Text = "Install"
 $Form.Controls.Add($InstallButton)
 $InstallButton.Add_Click({
     Save-Config
     Update-Config
+	Install-ARKServer
 })
 
 # Server Update Button
 $ServerUpdateButton = New-Object Windows.Forms.Button
-$ServerUpdateButton.Location = New-Object Drawing.Point(180, 450)  # Adjusted button position
+$ServerUpdateButton.Location = New-Object Drawing.Point(150, 500)
 $ServerUpdateButton.Size = New-Object Drawing.Size(80, 30)
 $ServerUpdateButton.Text = "Update"
 $Form.Controls.Add($ServerUpdateButton)
 $ServerUpdateButton.Add_Click({
-    Save-Config
-    Update-Config
+    try {
+        Save-Config
+        Update-Config
+        Update-ARKServer
+        [System.Windows.Forms.MessageBox]::Show("ARK Server has been updated successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("Error while updating the ARK server: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
+# Save Button
+$SaveButton = New-Object Windows.Forms.Button
+$SaveButton.Location = New-Object Drawing.Point(250, 500)
+$SaveButton.Size = New-Object Drawing.Size(80, 30)
+$SaveButton.Text = "Save"
+$Form.Controls.Add($SaveButton)
+$SaveButton.Add_Click({
+    try {
+        Save-Config
+        Update-Config
+        [System.Windows.Forms.MessageBox]::Show("Configuration has been saved and updated successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("Error while saving and updating the configuration: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
 })
 
 # Start Server Button
 $StartServerButton = New-Object Windows.Forms.Button
-$StartServerButton.Location = New-Object Drawing.Point(310, 450)  # Adjusted button position
+$StartServerButton.Location = New-Object Drawing.Point(350, 500)
 $StartServerButton.Size = New-Object Drawing.Size(80, 30)
 $StartServerButton.Text = "Start"
 $Form.Controls.Add($StartServerButton)
 $StartServerButton.Add_Click({
-    Save-Config
-    Update-Config
+    try {
+        Save-Config
+        Update-Config
+        Start-ARKServer
+        [System.Windows.Forms.MessageBox]::Show("ARK Server has been started successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("Error while starting the ARK server: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
 })
 
 # Function to update the GUI elements with the loaded configuration data
@@ -292,6 +365,9 @@ function Update-GUIFromConfig {
     $ModsTextBox.Text = $Mods
     $RCONPortTextBox.Text = $RCONPort
     $RCONEnabledComboBox.SelectedItem = $RCONEnabled
+    $ForceRespawnDinosCheckBox.Checked = [System.Boolean]::Parse($ConfigData.ForceRespawnDinos)  # Set checkbox value based on the saved boolean value
+    #$ClusterDirOverrideTextBox.Text = $ClusterDirOverride
+    #$ClusterIdTextBox.Text = $clusterid
 
 }
 
@@ -333,9 +409,16 @@ function Start-ARKServer {
     $QueryPort = $QueryPort.Trim()
     $MaxPlayers = $MaxPlayers.Trim()
     $BattleEye = $BattleEye.Trim()
+	
+	$ForceRespawnDinos = $ConfigData.ForceRespawnDinos
+	if ($ForceRespawnDinos -eq $true) {
+		$ForceRespawnDinosValue = "ForceRespawnDinos"
+	} else {
+		$ForceRespawnDinosValue = ""
+	}
 
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}"?RCONEnabled={7}?RCONPort={8} -{9} -automanagedmods -mods={10},', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $BattleEye, $Mods)
+    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}"?MaxPlayers="{6}"?RCONEnabled={7}?RCONPort={8} -{9} -automanagedmods -mods={10}, -{11}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $BattleEye, $Mods, $ForceRespawnDinosValue)
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
@@ -350,11 +433,6 @@ function Start-ARKServer {
     }
 }
 
-# Call the function when the "Start Server" button is clicked.
-$StartServerButton.Add_Click({
-    Start-ARKServer
-})
-
 # Function to update the ARK server
 function Update-ARKServer {
 
@@ -365,12 +443,7 @@ function Update-ARKServer {
     $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
 
     Start-Process -FilePath $SteamCMD\SteamCMD\steamcmd.exe -ArgumentList "+force_install_dir $ARKServerPath +login anonymous +app_update $AppID +quit" -Wait
-
 }
-# Call the function when the "Server Update" button is clicked.
-$ServerUpdateButton.Add_Click({
-    Update-ARKServer
-})
 
 function Update-Config {
     # Reading the variables from the GUI elements and saving them in the configuration file
@@ -388,6 +461,9 @@ function Update-Config {
     $ConfigData.Mods = $ModsTextBox.Text
     $ConfigData.RCONPort = $RCONPortTextBox.Text
     $ConfigData.RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
+    $ConfigData.ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+    #$ConfigData.ClusterDirOverride = $ClusterDirOverrideTextBox.Text
+    #$ConfigData.clusterid = $ClusterIdTextBox.Text
 
 
     # Update global variables with new values
@@ -405,6 +481,9 @@ function Update-Config {
     $script:Mods = $ConfigData.Mods
     $script:RCONPort = $ConfigData.RCONPort
     $script:RCONEnabled = $ConfigData.RCONEnabled
+    $script:ForceRespawnDinos = $ConfigData.ForceRespawnDinos  # Assign boolean value directly
+    #$script:ClusterDirOverride = $ConfigData.ClusterDirOverride
+    #$script:clusterid = $ConfigData.clusterid
 
     Save-Config
 }
@@ -425,8 +504,6 @@ function Install-ARKServer {
 		# Read the data from the configuration file
 		$ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
 		
-
-
         # Define paths and URLs
         $SteamCMD = $ConfigData.SteamCMD
         $TargetPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD"
@@ -518,11 +595,6 @@ function Install-ARKServer {
         [System.Windows.Forms.MessageBox]::Show("Error while installing the ARK server: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
 }
-
-
-$InstallButton.Add_Click({
-    Install-ARKServer
-})
 
 # Funktion, um die GUI anzuzeigen
 [Windows.Forms.Application]::Run($Form)
