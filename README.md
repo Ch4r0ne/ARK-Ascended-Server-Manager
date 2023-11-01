@@ -19,8 +19,6 @@ This script simplifies the server management process, offering a streamlined int
 ```
 New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27015 -Protocol UDP -Action Allow
 New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol UDP -Action Allow
-New-NetFirewallRule -DisplayName "ASA Server" -Direction Outbound -LocalPort 27015 -Protocol TCP -Action Allow
-New-NetFirewallRule -DisplayName "ASA Server" -Direction Outbound -LocalPort 27016 -Protocol UDP -Action Allow
 ```
 
 ## Known Issue:
