@@ -21,9 +21,6 @@ New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 2701
 New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol UDP -Action Allow
 ```
 
-## Known Issue:
-I'm currently facing a persistent problem where the server isn't getting listed. I've been diligently working on resolving this, but unfortunately, a solution has eluded me thus far. The detailed discussion of the issue can be found at this link. https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/discussions/1
-
 ## 🔍 Found a Bug? Help Us Improve!
 Hello developers and early adopters! Welcome to our app's preview release. 
 Your feedback is crucial as we refine every detail. 
