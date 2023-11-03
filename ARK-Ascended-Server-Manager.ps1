@@ -349,6 +349,21 @@ $StartServerButton.Add_Click({
     }
 })
 
+# Backup Button
+$BackupButton = New-Object Windows.Forms.Button
+$BackupButton.Location = New-Object Drawing.Point(450, 500)
+$BackupButton.Size = New-Object Drawing.Size(80, 30)
+$BackupButton.Text = "Backup"
+$Form.Controls.Add($BackupButton)
+$BackupButton.Add_Click({
+    try {
+        Download-BackupTool
+        Start-Backup
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
 # Function to update the GUI elements with the loaded configuration data
 function Update-GUIFromConfig {
     $SteamCMDPathTextBox.Text = $SteamCMD
@@ -392,6 +407,31 @@ if (Test-Path -Path $ScriptConfig) {
     # Update GUI with default config data
     Update-GUIFromConfig
 }
+
+function Download-BackupTool {
+    $BackupToolURL = ""
+    $BackupToolPath = ""
+    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.1/Backup_Tool.msi"
+    $BackupToolPath = Join-Path $ConfigFolderPath "Backup_Tool.msi"
+    if (-not (Test-Path -Path $BackupToolPath)) {
+        Write-Output "Downloading Backup Tool..."
+        Invoke-WebRequest -Uri $BackupToolURL -OutFile $BackupToolPath
+        Write-Output "Backup Tool downloaded successfully."
+    }
+}
+
+function Start-Backup {
+    $MSIPath = Join-Path $ConfigFolderPath "Backup_Tool.msi"
+
+    try {
+        Start-Process msiexec.exe -ArgumentList "/i `"$MSIPath`"" -Wait -PassThru
+        Write-Output "MSI installation completed successfully."
+    } catch {
+        Write-Output "Error during MSI installation: $_"
+    }
+}
+
+
 
 # Function to start the ARK server
 function Start-ARKServer {
