@@ -10,7 +10,11 @@ This script simplifies the server management process, offering a streamlined int
 
 ## Build for Windows Server 2022 / 2019
 
-![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
+![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview.png)
+
+## Auto Backup
+
+![Backup_Tool.png](Preview/Backup_Tool.png)
 
 ## Port forward Ports
 - Port = 27015 - UDP 
@@ -26,7 +30,6 @@ New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 2701
 ### Main Features:
 - **RCON Sending**: Functionality to send commands via console in the GUI.
 - **Services Management**: Start / Stop / Update / Remove services.
-- **Auto Backup**: Create versions automatically upon each restart (service update).
 
 ### Additional Features:
 - **Online Player Count and Status**: Display the number of online players.
