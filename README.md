@@ -33,8 +33,6 @@ QueryPort = 27016 - TCP (currently not yet in use)
 
 ## Roadmap
 
-### Main features:
-
 - **RCON transmission**: Function for sending commands via the console in the graphical user interface.
 - **Service management**: Start / stop / update / remove services.
 - **Display online player count and status**: Display the number of people playing online.
