@@ -39,8 +39,5 @@ New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 2701
 - **Edit Configuration Files**: Access and modify 'Game.ini' and 'GameUserSettings.ini'.
 
 
-## 🔍 Found a Bug? Help Us Improve!
-Hello developers and early adopters! Welcome to our app's preview release. 
-Your feedback is crucial as we refine every detail. 
-If you encounter any bugs or unexpected behavior, please report them on GitHub. 
-Your reports guide us toward a seamless user experience. Thank you!
+## 🐞 Found a Bug? Help Us Improve!
+Welcome to the preview release of ARK-Ascended-Server-Manager! Your feedback is invaluable as we refine the application. If you encounter any bugs or unexpected behavior, please report them on GitHub. Your reports guide us toward a seamless user experience. Thank you for your support!
