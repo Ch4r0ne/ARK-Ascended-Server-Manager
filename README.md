@@ -10,11 +10,11 @@ This script simplifies the server management process, offering a streamlined int
 
 ## Build for Windows Server 2022 / 2019
 
-![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview.png)
+![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
 
 ## Auto Backup
 
-![Backup_Tool.png](Preview/Backup_Tool.png)
+![BackupJobSchedulerGUI.png](BackupJobSchedulerGUI.png)
 
 ## Port forward Ports
 - Port = 27015 - UDP 
