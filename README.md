@@ -10,7 +10,7 @@ ARK Ascended Server Manager is a powerful PowerShell script that simplifies the 
 
 - **Automatic Updates**: Stay up to date with the latest patches and content by simply updating the server with SteamCMD. Your server is always up to date, without any effort.
 
-- One-click server launch**: Start your ARK game server with a single click. The script creates precise command line arguments based on your configuration, eliminating the need for manual input.
+- **One-click server launch**: Start your ARK game server with a single click. The script creates precise command line arguments based on your configuration, eliminating the need for manual input.
 
 ## Compatibility
 
