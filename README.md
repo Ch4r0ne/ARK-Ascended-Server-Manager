@@ -14,7 +14,7 @@ This script simplifies the server management process, offering a streamlined int
 
 ## Auto Backup
 
-![BackupJobSchedulerGUI.png](BackupJobSchedulerGUI.png)
+![BackupJobSchedulerGUI.png](Preview/BackupJobSchedulerGUI.png)
 
 ## Port forward Ports
 - Port = 27015 - UDP 
