@@ -20,7 +20,7 @@ Developed for Windows Server 2022/2019
 
 ## Automatic backup with backup tool
 
-I have also developed another tool for this project, which is available as [Backup-Tool](https://github.com/Ch4r0ne/Backup-Tool). This tool was developed specifically for the **BackupJobSchedulerGUI** and offers an efficient and user-friendly solution for automatically backing up your data.
+I have developed another tool for the project, which is available as [Backup-Tool](https://github.com/Ch4r0ne/Backup-Tool). It was designed specifically for this project and offers an efficient and user-friendly solution for automatic data backup. The backup button start this tool.
 
 ![BackupJobSchedulerGUI.png](Preview/BackupJobSchedulerGUI.png)
 
