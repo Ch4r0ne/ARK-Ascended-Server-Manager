@@ -8,7 +8,6 @@ $DefaultConfig = @{
     ServerMAP = "TheIsland_WP"
     ServerName = ""
     MaxPlayers = "70"
-    AppID = "2430930"
     Port = "27015"
     QueryPort = "27016"
     BattleEye = "NoBattlEye"
@@ -17,9 +16,7 @@ $DefaultConfig = @{
     Mods= ""
     RCONPort = "27020"
     RCONEnabled = "False"
-    ForceRespawnDinos = $false  # Set the default value as a boolean
-    #ClusterDirOverride = ""
-    #clusterid = ""
+    ForceRespawnDinos = $false  # Set the default value as a boolean"
 }
 
 # Create configuration folder and file if not exists
@@ -38,7 +35,6 @@ function Save-Config {
         ServerMAP = $ServerMAPTextBox.Text
         ServerName = $ServerNameTextBox.Text
         MaxPlayers = $MaxPlayersTextBox.Text
-        AppID = $AppIDTextBox.Text
         Port = $PortTextBox.Text
         QueryPort = $QueryPortTextBox.Text
         BattleEye = $BattleEyeComboBox.SelectedItem.ToString()
@@ -48,8 +44,6 @@ function Save-Config {
         RCONPort = $RCONPortTextBox.Text
         RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
         ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
-        #ClusterDirOverride = $ClusterDirOverrideTextBox.Text
-        #clusterid = $ClusterIdTextBox.Text
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -78,7 +72,6 @@ $ARKServerPath = $ConfigData.ARKServerPath
 $ServerMAP = $ConfigData.ServerMAP
 $ServerName = $ConfigData.ServerName
 $MaxPlayers = $ConfigData.MaxPlayers
-$AppID = $ConfigData.AppID
 $Port = $ConfigData.Port
 $QueryPort = $ConfigData.QueryPort
 $BattleEye = $ConfigData.BattleEye
@@ -88,8 +81,6 @@ $Mods = $ConfigData.Mods
 $RCONPort = $ConfigData.RCONPort
 $RCONEnabled = $ConfigData.RCONEnabled
 $ForceRespawnDinos = $ConfigData.ForceRespawnDinos
-#$ClusterDirOverride = $ConfigData.ClusterDirOverride
-#$clusterid = $ConfigData.clusterid
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
@@ -150,17 +141,6 @@ $MaxPlayersTextBox = New-Object Windows.Forms.TextBox
 $MaxPlayersTextBox.Location = New-Object Drawing.Point(200, 170)
 $MaxPlayersTextBox.Size = New-Object Drawing.Size(50, 20)
 $Form.Controls.Add($MaxPlayersTextBox)
-
-# AppID
-$AppIDLabel = New-Object Windows.Forms.Label
-$AppIDLabel.Text = "AppID:"
-$AppIDLabel.Location = New-Object Drawing.Point(50, 200)
-$Form.Controls.Add($AppIDLabel)
-
-$AppIDTextBox = New-Object Windows.Forms.TextBox
-$AppIDTextBox.Location = New-Object Drawing.Point(200, 200)
-$AppIDTextBox.Size = New-Object Drawing.Size(50, 20)
-$Form.Controls.Add($AppIDTextBox)
 
 # Port
 $PortLabel = New-Object Windows.Forms.Label
@@ -264,29 +244,6 @@ $ForceRespawnDinosCheckBox.Location = New-Object Drawing.Point(200, 440)
 $ForceRespawnDinosCheckBox.Size = New-Object Drawing.Size(20, 20)
 $Form.Controls.Add($ForceRespawnDinosCheckBox)
 
-
-# ClusterDirOverride (Textfeld)
-#$ClusterDirOverrideLabel = New-Object Windows.Forms.Label
-#$ClusterDirOverrideLabel.Text = "ClusterDirOverride"
-#$ClusterDirOverrideLabel.Location = New-Object Drawing.Point(50, 470)
-#$Form.Controls.Add($ClusterDirOverrideLabel)
-
-#$ClusterDirOverrideTextBox = New-Object Windows.Forms.TextBox
-#$ClusterDirOverrideTextBox.Location = New-Object Drawing.Point(200, 470)
-#$ClusterDirOverrideTextBox.Size = New-Object Drawing.Size(100, 20)
-#$Form.Controls.Add($ClusterDirOverrideTextBox)
-
-# clusterid (Textfeld)
-#$ClusterIdLabel = New-Object Windows.Forms.Label
-#$ClusterIdLabel.Text = "clusterid"
-#$ClusterIdLabel.Location = New-Object Drawing.Point(330, 470)
-#$Form.Controls.Add($ClusterIdLabel)
-
-#$ClusterIdTextBox = New-Object Windows.Forms.TextBox
-#$ClusterIdTextBox.Location = New-Object Drawing.Point(440, 470)
-#$ClusterIdTextBox.Size = New-Object Drawing.Size(100, 20)
-#$Form.Controls.Add($ClusterIdTextBox)
-
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
 $InstallButton.Location = New-Object Drawing.Point(50, 500)
@@ -342,6 +299,7 @@ $StartServerButton.Add_Click({
     try {
         Save-Config
         Update-Config
+        #Update-ARKServer
         Start-ARKServer
         [System.Windows.Forms.MessageBox]::Show("ARK Server has been started successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
     } catch {
@@ -356,11 +314,16 @@ $BackupButton.Size = New-Object Drawing.Size(80, 30)
 $BackupButton.Text = "Backup"
 $Form.Controls.Add($BackupButton)
 $BackupButton.Add_Click({
-    try {
-        Download-BackupTool
-        Start-Backup
-    } catch {
-        [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    $downloadConfirmation = [System.Windows.Forms.MessageBox]::Show("Do you want to download the backup tool?", "Confirmation", [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Question)
+    if ($downloadConfirmation -eq [System.Windows.Forms.DialogResult]::OK) {
+        try {
+            Download-BackupTool
+            Start-Backup
+        } catch {
+            [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        }
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("Backup process canceled.", "Canceled", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
     }
 })
 
@@ -371,7 +334,6 @@ function Update-GUIFromConfig {
     $ServerMAPTextBox.Text = $ServerMAP
     $ServerNameTextBox.Text = $ServerName
     $MaxPlayersTextBox.Text = $MaxPlayers
-    $AppIDTextBox.Text = $AppID
     $PortTextBox.Text = $Port
     $QueryPortTextBox.Text = $QueryPort
     $BattleEyeComboBox.SelectedItem = $BattleEye
@@ -381,8 +343,6 @@ function Update-GUIFromConfig {
     $RCONPortTextBox.Text = $RCONPort
     $RCONEnabledComboBox.SelectedItem = $RCONEnabled
     $ForceRespawnDinosCheckBox.Checked = [System.Boolean]::Parse($ConfigData.ForceRespawnDinos)  # Set checkbox value based on the saved boolean value
-    #$ClusterDirOverrideTextBox.Text = $ClusterDirOverride
-    #$ClusterIdTextBox.Text = $clusterid
 
 }
 
@@ -411,8 +371,8 @@ if (Test-Path -Path $ScriptConfig) {
 function Download-BackupTool {
     $BackupToolURL = ""
     $BackupToolPath = ""
-    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.1/Backup_Tool.msi"
-    $BackupToolPath = Join-Path $ConfigFolderPath "Backup_Tool.msi"
+    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.2/BackupJobSchedulerGUI.msi"
+    $BackupToolPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
     if (-not (Test-Path -Path $BackupToolPath)) {
         Write-Output "Downloading Backup Tool..."
         Invoke-WebRequest -Uri $BackupToolURL -OutFile $BackupToolPath
@@ -421,7 +381,7 @@ function Download-BackupTool {
 }
 
 function Start-Backup {
-    $MSIPath = Join-Path $ConfigFolderPath "Backup_Tool.msi"
+    $MSIPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
 
     try {
         Start-Process msiexec.exe -ArgumentList "/i `"$MSIPath`"" -Wait -PassThru
@@ -430,8 +390,6 @@ function Start-Backup {
         Write-Output "Error during MSI installation: $_"
     }
 }
-
-
 
 # Function to start the ARK server
 function Start-ARKServer {
@@ -443,22 +401,29 @@ function Start-ARKServer {
     $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
 
     # Trim the variables to remove spaces
-    $ServerMAP = $ServerMAP.Trim()
-    $ServerName = $ServerName.Trim()
-    $Port = $Port.Trim()
-    $QueryPort = $QueryPort.Trim()
-    $MaxPlayers = $MaxPlayers.Trim()
-    $BattleEye = $BattleEye.Trim()
-	
-	$ForceRespawnDinos = $ConfigData.ForceRespawnDinos
-	if ($ForceRespawnDinos -eq $true) {
-		$ForceRespawnDinosValue = "ForceRespawnDinos"
-	} else {
-		$ForceRespawnDinosValue = ""
-	}
+    $ServerMAP = $ConfigData.ServerMAP.Trim()
+    $ServerName = $ConfigData.ServerName.Trim()
+    $Port = $ConfigData.Port.Trim()
+    $QueryPort = $ConfigData.QueryPort.Trim()
+    $Password = $ConfigData.Password.Trim()
+    $AdminPassword = $ConfigData.AdminPassword.Trim()
+    $RCONEnabled = $ConfigData.RCONEnabled
+    $RCONPort = $ConfigData.RCONPort
+    $BattleEye = $ConfigData.BattleEye
+    $Mods = $ConfigData.Mods.Trim()
+    $MaxPlayer = $ConfigData.MaxPlayer
+
+    $ForceRespawnDinos = $ConfigData.ForceRespawnDinos
+    if ($ForceRespawnDinos -eq $true) {
+        $ForceRespawnDinosValue = "ForceRespawnDinos"
+    } else {
+        $ForceRespawnDinosValue = ""
+    }
+
+    $MaxPlayers = $ConfigData.MaxPlayers.Trim()
 
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('{0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?ServerAdminPassword="{5}?RCONEnabled={6}?RCONPort={7} -{8} -automanagedmods -mods={9}, -{10}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $RCONEnabled, $RCONPort, $BattleEye, $Mods, $ForceRespawnDinosValue)
+    $ServerArguments = "{0}?listen?SessionName=""{1}""?Port={2}?QueryPort={3}?ServerPassword=""{4}""?ServerAdminPassword=""{5}""?RCONEnabled={6}?RCONPort={7}?MaxPlayers={8} -{9} -automanagedmods -mods={10}, -{11}" -f $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $RCONEnabled, $RCONPort, $MaxPlayers, $BattleEye, $Mods, $ForceRespawnDinosValue
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
@@ -472,6 +437,7 @@ function Start-ARKServer {
         Write-Output "Fehler: ServerArguments are null or spaces."
     }
 }
+
 
 # Function to update the ARK server
 function Update-ARKServer {
@@ -492,7 +458,6 @@ function Update-Config {
     $ConfigData.ServerMAP = $ServerMAPTextBox.Text
     $ConfigData.ServerName = $ServerNameTextBox.Text
     $ConfigData.MaxPlayers = $MaxPlayersTextBox.Text
-    $ConfigData.AppID = $AppIDTextBox.Text
     $ConfigData.Port = $PortTextBox.Text
     $ConfigData.QueryPort = $QueryPortTextBox.Text
     $ConfigData.BattleEye = $BattleEyeComboBox.SelectedItem.ToString()
@@ -502,8 +467,6 @@ function Update-Config {
     $ConfigData.RCONPort = $RCONPortTextBox.Text
     $ConfigData.RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
     $ConfigData.ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
-    #$ConfigData.ClusterDirOverride = $ClusterDirOverrideTextBox.Text
-    #$ConfigData.clusterid = $ClusterIdTextBox.Text
 
 
     # Update global variables with new values
@@ -512,7 +475,6 @@ function Update-Config {
     $script:ServerMAP = $ConfigData.ServerMAP
     $script:ServerName = $ConfigData.ServerName
     $script:MaxPlayers = $ConfigData.MaxPlayers
-    $script:AppID = $ConfigData.AppID
     $script:Port = $ConfigData.Port
     $script:QueryPort = $ConfigData.QueryPort
     $script:BattleEye = $ConfigData.BattleEye
@@ -522,8 +484,6 @@ function Update-Config {
     $script:RCONPort = $ConfigData.RCONPort
     $script:RCONEnabled = $ConfigData.RCONEnabled
     $script:ForceRespawnDinos = $ConfigData.ForceRespawnDinos  # Assign boolean value directly
-    #$script:ClusterDirOverride = $ConfigData.ClusterDirOverride
-    #$script:clusterid = $ConfigData.clusterid
 
     Save-Config
 }
@@ -531,22 +491,11 @@ function Update-Config {
 # Function for installing the ARK server
 function Install-ARKServer {
     try {
-
-        $SteamCMD = ""
-        $TargetPath = ""
-        $SteamCMDExecutable = ""
-        $TempPath = ""
-        $downloadPath = ""
-
         # Update configuration settings
         Update-Config
-		
-		# Read the data from the configuration file
-		$ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
-		
-        # Define paths and URLs
-        $SteamCMD = $ConfigData.SteamCMD
-        $TargetPath = Join-Path -Path $SteamCMD -ChildPath "SteamCMD"
+
+        # Configuration settings
+        $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
         $SteamCMDURL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
         $downloadPath = $env:TEMP
         $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
@@ -563,78 +512,75 @@ function Install-ARKServer {
                 throw "Error during the installation of $outputFile. Exit-Code: $($process.ExitCode)"
             }
         }
-		
-			    # Invoke certificate installation script
-				. {
-					# Certificate installation script
-					# URL of the certificate
-					$amazonRootCAUrl = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
-					$certificateUrl = "http://crt.r2m02.amazontrust.com/r2m02.cer"
 
-					# Target directory for the certificate
-					$amazonRootCADirectory = "$env:TEMP\AmazonRootCA1.cer"
-					$targetDirectory = "$env:TEMP\r2m02.cer"
+        # Certificate installation
+        . {
+            $amazonRootCAUrl = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
+            $certificateUrl = "http://crt.r2m02.amazontrust.com/r2m02.cer"
+            $amazonRootCADirectory = "$env:TEMP\AmazonRootCA1.cer"
+            $targetDirectory = "$env:TEMP\r2m02.cer"
 
-					try {
-						
-						# AmazonRootCA1-Zertifikat downloade
-						Invoke-WebRequest -Uri $amazonRootCAUrl -OutFile $amazonRootCADirectory -UseBasicParsing -ErrorAction Stop
-						
-						# Download the certificate with SSL/TLS certificate validation
-						Invoke-WebRequest -Uri $certificateUrl -OutFile $targetDirectory -UseBasicParsing -ErrorAction Stop
+            try {
+                Invoke-WebRequest -Uri $amazonRootCAUrl -OutFile $amazonRootCADirectory -UseBasicParsing -ErrorAction Stop
+                Invoke-WebRequest -Uri $certificateUrl -OutFile $targetDirectory -UseBasicParsing -ErrorAction Stop
 
-						# Add certificate to current user's intermediate CA
-						Import-Certificate -FilePath $amazonRootCADirectory -CertStoreLocation Cert:\CurrentUser\CA -ErrorAction Stop
-						
-						$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
-						$cert.Import($targetDirectory)
-						$store = New-Object System.Security.Cryptography.X509Certificates.X509Store("CA", "CurrentUser")
-						$store.Open("ReadWrite")
-						$store.Add($cert)
-						$store.Close()
+                Import-Certificate -FilePath $amazonRootCADirectory -CertStoreLocation Cert:\CurrentUser\CA -ErrorAction Stop
+                $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+                $cert.Import($targetDirectory)
+                $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("CA", "CurrentUser")
+                $store.Open("ReadWrite")
+                $store.Add($cert)
+                $store.Close()
 
-						# Add certificate to the intermediate certification authority of the local machine (administrator rights required)
-						$store = New-Object System.Security.Cryptography.X509Certificates.X509Store("CA", "LocalMachine")
-						$store.Open("ReadWrite")
-						$store.Add($cert)
-						$store.Close()
-					}
-					catch {
-						Write-Error "Error occurred while installing the certificate: $_"
-					}
-				}
+                $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("CA", "LocalMachine")
+                $store.Open("ReadWrite")
+                $store.Add($cert)
+                $store.Close()
+            }
+            catch {
+                Write-Error "Error occurred while installing the certificate: $_"
+            }
+        }
+
+        # Output installation message with Cancel button
+        $result = [System.Windows.Forms.MessageBox]::Show("The installation process will start now. Please wait, this may take 1-10 minutes. Required components will be downloaded and installed. Click 'Cancel' to stop the installation.", "Installation Start", [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Information)
+
+        if ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
+            Write-Output "Installation canceled."
+            return
+        }
 
         # Install Visual C++ Redistributable if not already installed
         if (!(Test-Path -Path "HKLM:\Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue)) {
-            Install-Component -url $vcRedistUrl -outputFile "vc_redist.x64.exe" -arguments "/install", "/quiet", "/norestart"
+            Install-Component -url $vcRedistUrl -outputFile "vc_redist.x64.exe" -arguments "/install", "/passive", "/norestart" -wait
         } else {
             Write-Output "Visual C++ Redistributable already installed."
         }
 
         # Install DirectX Runtime if not already installed
         if (!(Test-Path "HKLM:\Software\Microsoft\DirectX" -ErrorAction SilentlyContinue)) {
-            Install-Component -url $directXUrl -outputFile "dxwebsetup.exe" -arguments "/silent"
+            Install-Component -url $directXUrl -outputFile "dxwebsetup.exe" -arguments "/silent" -wait
         } else {
             Write-Output "DirectX Runtime already installed."
         }
 
-        # Create the SteamCMD folder if it does not exist
+        # Create SteamCMD folder if it does not exist
+        $TargetPath = Join-Path -Path $ConfigData.SteamCMD -ChildPath "SteamCMD"
         if (-not (Test-Path -Path $TargetPath)) {
             New-Item -Path $TargetPath -ItemType Directory -Force
         }
 
         # Download and install SteamCMD
-        Write-Output "Download SteamCMD and install ARK Server.."
-        Invoke-WebRequest -Uri $SteamCMDURL -OutFile "$downloadPath\steamcmd.zip"
+        Write-Output "Downloading SteamCMD and installing ARK Server..."
+        Invoke-WebRequest -Uri $SteamCMDURL -OutFile "$downloadPath\steamcmd.zip" -UseBasicParsing
         Expand-Archive -Path "$downloadPath\steamcmd.zip" -DestinationPath $TargetPath -Force
         $SteamCmdPath = Join-Path -Path $TargetPath -ChildPath "steamcmd.exe"
-        Start-Process -FilePath $SteamCmdPath -ArgumentList @("+force_install_dir", "$ARKServerPath", "+login", "anonymous", "+app_update", "$AppID", "+quit") -Wait
+        Start-Process -FilePath $SteamCmdPath -ArgumentList @("+force_install_dir", "$ARKServerPath", "+login", "anonymous", "+app_update", "2430930", "+quit") -Wait
 
-        [System.Windows.Forms.MessageBox]::Show("ARK Server has been successfully installed.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        [System.Windows.Forms.MessageBox]::Show("ARK Server has been successfully installed.", "Installation Complete", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
     } catch {
-        [System.Windows.Forms.MessageBox]::Show("Error while installing the ARK server: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        [System.Windows.Forms.MessageBox]::Show("Error occurred while installing the ARK server: $_", "Installation Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
 }
 
-# Funktion, um die GUI anzuzeigen
 [Windows.Forms.Application]::Run($Form)
