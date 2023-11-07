@@ -6,7 +6,6 @@ import tkinter as tk
 from tkinter import messagebox
 import winreg
 import zipfile
-import certifi
 import requests
 
 # Define default values
@@ -381,7 +380,6 @@ def launch_ark():
 
     # Define the variables (simulating PowerShell variables)
     ARKServerPath = "C:\\GameServer\\ARK-Survival-Ascended-Server"  # Replace with your actual path
-    ServerArguments = 'start TheIsland?listen?SessionName="MyServer"?Port=7777?QueryPort=27015?ServerPassword="MyPassword"?MaxPlayers="20"?RCONEnabled=True?RCONPort=27020?ServerAdminPassword="Admin123" -True -automanagedmods -mods=Mod1,Mod2,Mod3, -True'
 
     # Construct the server path
     ServerPath = f'{ARKServerPath}\\ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe'
