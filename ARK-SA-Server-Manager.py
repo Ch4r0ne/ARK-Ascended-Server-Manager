@@ -1,3 +1,4 @@
+import ctypes
 import os
 import json
 import subprocess
@@ -29,7 +30,7 @@ app_id = "376030"
 
 # Create configuration folder and file if not exists
 config_folder_path = os.path.join(os.getenv('APPDATA'), "ARK-Ascended-Server-Manager")
-script_config = os.path.join(config_folder_path, "Config.json")
+script_config = os.path.join(config_folder_path, "testConfig.json")
 
 if not os.path.exists(config_folder_path):
     os.makedirs(config_folder_path)
@@ -207,19 +208,52 @@ def install_ark_server():
     steamcmd_path = config_data["SteamCMD"]
     ark_server_path = config_data["ARKServerPath"]
     
-    # Download and append Amazon Root CA certificate
+    # URLs for the certificates
     amazon_root_ca_url = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
-    amazon_root_ca = certifi.contents()
-    amazon_root_ca += requests.get(amazon_root_ca_url).content
-    certifi.where().write_bytes(amazon_root_ca)
+    certificate_url = "http://crt.r2m02.amazontrust.com/r2m02.cer"
 
-    # Download and append r2m02 certificate
-    r2m02_url = "http://crt.r2m02.amazontrust.com/r2m02.cer"
-    r2m02 = certifi.contents()
-    r2m02 += requests.get(r2m02_url).content
-    certifi.where().write_bytes(r2m02)
+    # Paths for certificate storage
+    amazon_root_ca_path = os.path.join(os.environ['TEMP'], 'AmazonRootCA1.cer')
+    target_path = os.path.join(os.environ['TEMP'], 'r2m02.cer')
 
-    print("Certificates installed successfully.")
+    try:
+        # Download Amazon Root CA
+        amazon_root_ca = requests.get(amazon_root_ca_url)
+        with open(amazon_root_ca_path, 'wb') as file:
+            file.write(amazon_root_ca.content)
+
+        # Download Certificate
+        certificate = requests.get(certificate_url)
+        with open(target_path, 'wb') as file:
+            file.write(certificate.content)
+
+        # Install the certificates using Windows API functions
+        crypt32 = ctypes.WinDLL('Crypt32.dll')
+
+        # Load the Amazon Root CA certificate into the current user's certificate store
+        crypt32.CertAddEncodedCertificateToStore(
+            ctypes.c_void_p(crypt32.CertOpenSystemStoreW(0, "CA")),
+            1,  # X509_ASN_ENCODING
+            ctypes.c_char_p(0),  # pbCertEncoded
+            ctypes.c_int(len(amazon_root_ca.content)),
+            ctypes.c_int(0),  # dwAddDisposition
+            ctypes.byref(ctypes.c_int(0))  # pCertContext
+        )
+
+        # Load the specific certificate into the store
+        crypt32.CertAddEncodedCertificateToStore(
+            ctypes.c_void_p(crypt32.CertOpenSystemStoreW(0, "CA")),
+            1,  # X509_ASN_ENCODING
+            ctypes.c_char_p(certificate.content),
+            ctypes.c_int(len(certificate.content)),
+            ctypes.c_int(0),  # dwAddDisposition
+            ctypes.byref(ctypes.c_int(0))  # pCertContext
+        )
+
+        print("Certificates installed successfully.")
+
+    except Exception as e:
+        print(f"Error occurred while installing the certificates: {e}")
 
     # Create required directories if they don't exist
     for directory in [steamcmd_path, ark_server_path]:
