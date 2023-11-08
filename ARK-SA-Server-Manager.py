@@ -1,3 +1,4 @@
+import ctypes
 import os
 import json
 import subprocess
@@ -5,8 +6,8 @@ import tkinter as tk
 from tkinter import messagebox
 import winreg
 import zipfile
-import certifi
 import requests
+import threading
 
 # Define default values
 default_config = {
@@ -23,13 +24,15 @@ default_config = {
     "Mods": "",
     "RCONPort": "27020",
     "RCONEnabled": False,
-    "ForceRespawnDinos": False
+    "ForceRespawnDinos": False,
+    "UpdateAndValidate": False 
 }
 app_id = "376030"
+task_thread = None
 
 # Create configuration folder and file if not exists
 config_folder_path = os.path.join(os.getenv('APPDATA'), "ARK-Ascended-Server-Manager")
-script_config = os.path.join(config_folder_path, "Config.json")
+script_config = os.path.join(config_folder_path, "testConfig.json")
 
 if not os.path.exists(config_folder_path):
     os.makedirs(config_folder_path)
@@ -50,7 +53,8 @@ def save_config():
         "Mods": mods.get(),
         "RCONPort": rcon_port.get(),
         "RCONEnabled": rcon_enabled.get(),
-        "ForceRespawnDinos": force_respawn_dinos_var.get()
+        "ForceRespawnDinos": force_respawn_dinos_var.get(),
+        "UpdateAndValidate": update_and_validate_var.get()
     }
     
     with open(script_config, 'w') as config_file:
@@ -133,7 +137,7 @@ query_port = tk.Entry(form)
 query_port.place(x=200, y=260, width=50, height=20)
 query_port.insert(0, config_data["QueryPort"])
 
-# BattleEye
+# BattleEye (Checkbox)
 battle_eye_label = tk.Label(form, text="BattleEye:")
 battle_eye_label.place(x=50, y=290)
 
@@ -166,7 +170,7 @@ password = tk.Entry(form)
 password.place(x=200, y=350, width=150, height=20)
 password.insert(0, config_data["Password"])
 
-# RCON Enabled
+# RCON Enabled (Checkbox)
 rcon_enabled_label = tk.Label(form, text="RCON Enabled:")
 rcon_enabled_label.place(x=50, y=380)
 
@@ -192,10 +196,25 @@ force_respawn_dinos_var.set(config_data["ForceRespawnDinos"])
 force_respawn_dinos_checkbox = tk.Checkbutton(form, variable=force_respawn_dinos_var)
 force_respawn_dinos_checkbox.place(x=200, y=440)
 
+# Update/Validate on server start (Checkbox)
+update_and_validate_label = tk.Label(form, text="Update/Validate on server start:")
+update_and_validate_label.place(x=230, y=440)
+
+update_and_validate_var = tk.BooleanVar()
+update_and_validate_var.set(config_data["UpdateAndValidate"])
+update_and_validate_checkbox = tk.Checkbutton(form, variable=update_and_validate_var)
+update_and_validate_checkbox.place(x=400, y=440)
+
 # Install Button
 def install_button_click():
+    global task_thread
     save_config()
-    install_ark_server()
+    if task_thread and task_thread.is_alive():
+        print("Task is already running.")
+    else:
+        task_thread = threading.Thread(target=install_ark_server)
+        task_thread.start()
+    
     
 install_button = tk.Button(form, text="Install", command=install_button_click)
 install_button.place(x=50, y=500, width=80, height=30)
@@ -207,19 +226,52 @@ def install_ark_server():
     steamcmd_path = config_data["SteamCMD"]
     ark_server_path = config_data["ARKServerPath"]
     
-    # Download and append Amazon Root CA certificate
+    # URLs for the certificates
     amazon_root_ca_url = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
-    amazon_root_ca = certifi.contents()
-    amazon_root_ca += requests.get(amazon_root_ca_url).content
-    certifi.where().write_bytes(amazon_root_ca)
+    certificate_url = "http://crt.r2m02.amazontrust.com/r2m02.cer"
 
-    # Download and append r2m02 certificate
-    r2m02_url = "http://crt.r2m02.amazontrust.com/r2m02.cer"
-    r2m02 = certifi.contents()
-    r2m02 += requests.get(r2m02_url).content
-    certifi.where().write_bytes(r2m02)
+    # Paths for certificate storage
+    amazon_root_ca_path = os.path.join(os.environ['TEMP'], 'AmazonRootCA1.cer')
+    target_path = os.path.join(os.environ['TEMP'], 'r2m02.cer')
 
-    print("Certificates installed successfully.")
+    try:
+        # Download Amazon Root CA
+        amazon_root_ca = requests.get(amazon_root_ca_url)
+        with open(amazon_root_ca_path, 'wb') as file:
+            file.write(amazon_root_ca.content)
+
+        # Download Certificate
+        certificate = requests.get(certificate_url)
+        with open(target_path, 'wb') as file:
+            file.write(certificate.content)
+
+        # Install the certificates using Windows API functions
+        crypt32 = ctypes.WinDLL('Crypt32.dll')
+
+        # Load the Amazon Root CA certificate into the current user's certificate store
+        crypt32.CertAddEncodedCertificateToStore(
+            ctypes.c_void_p(crypt32.CertOpenSystemStoreW(0, "CA")),
+            1,  # X509_ASN_ENCODING
+            ctypes.c_char_p(0),  # pbCertEncoded
+            ctypes.c_int(len(amazon_root_ca.content)),
+            ctypes.c_int(0),  # dwAddDisposition
+            ctypes.byref(ctypes.c_int(0))  # pCertContext
+        )
+
+        # Load the specific certificate into the store
+        crypt32.CertAddEncodedCertificateToStore(
+            ctypes.c_void_p(crypt32.CertOpenSystemStoreW(0, "CA")),
+            1,  # X509_ASN_ENCODING
+            ctypes.c_char_p(certificate.content),
+            ctypes.c_int(len(certificate.content)),
+            ctypes.c_int(0),  # dwAddDisposition
+            ctypes.byref(ctypes.c_int(0))  # pCertContext
+        )
+
+        print("Certificates installed successfully.")
+
+    except Exception as e:
+        print(f"Error occurred while installing the certificates: {e}")
 
     # Create required directories if they don't exist
     for directory in [steamcmd_path, ark_server_path]:
@@ -273,8 +325,8 @@ def install_ark_server():
     # Install ARK Server using SteamCMD
     print("Installing ARK Server using SteamCMD...")
     steam_cmd_path = os.path.join(steamcmd_path, "steamcmd.exe")
-    steamcmd_arguments = f"+force_install_dir {ark_server_path} +login anonymous +app_update {app_id} validate +quit"
-    subprocess.call([steam_cmd_path, steamcmd_arguments], shell=True)
+    #steamcmd_arguments = f"+force_install_dir {ark_server_path} +login anonymous +app_update {app_id} validate +quit"
+    subprocess.call([steam_cmd_path, "+force_install_dir", f"{ark_server_path}", "+login", "anonymous", "+app_update", "2430930", "+quit"], shell=True)
 
     print("ARK Server has been successfully installed.")
     
@@ -284,7 +336,14 @@ def install_ark_server():
     
 # Server Update Button
 def server_update_click():
+    global task_thread
     save_config()
+    if task_thread and task_thread.is_alive():
+        print("Task is already running.")
+    else:
+        task_thread = threading.Thread(target=start_server_update)
+        task_thread.start()
+    
     
 
 server_update_button = tk.Button(form, text="Update", command=server_update_click)
@@ -295,8 +354,8 @@ def start_server_update():
     print("Installing ARK Server using SteamCMD...")
     ark_path = config_data["ARKServerPath"]
     steam_cmd_path = os.path.join(config_data["SteamCMD"], "steamcmd.exe")
-    steamcmd_arguments = f"+force_install_dir {ark_path} +login anonymous +app_update {app_id} validate +quit"
-    subprocess.call([steam_cmd_path, steamcmd_arguments], shell=True)
+    #steamcmd_arguments = f"+force_install_dir {ark_path} +login anonymous +app_update {app_id} validate +quit"
+    subprocess.call([steam_cmd_path, "+force_install_dir", f"{ark_server_path}", "+login", "anonymous", "+app_update", "2430930", "+quit"], shell=True)
 
     print("ARK Server has been successfully installed.")
 
@@ -309,8 +368,13 @@ save_button.place(x=250, y=500, width=80, height=30)
 
 # Launch ARK Button
 def launch_ark_click():
+    global task_thread
     save_config()
-    launch_ark()
+    if task_thread and task_thread.is_alive():
+        print("Task is already running.")
+    else:
+        task_thread = threading.Thread(target=launch_ark)
+        task_thread.start()
 
 launch_ark_button = tk.Button(form, text="Launch", command=launch_ark_click)
 launch_ark_button.place(x=350, y=500, width=80, height=30)
@@ -318,7 +382,7 @@ launch_ark_button.place(x=350, y=500, width=80, height=30)
 
 def launch_ark():
     ServerMAP = config_data["ServerMAP"]
-    ServerName = config_data["ARKServerPath"]
+    ServerName = config_data["ServerName"]
     Port = config_data["Port"]
     QueryPort = config_data["QueryPort"]
     Password = config_data["Password"]
@@ -329,6 +393,9 @@ def launch_ark():
     BattleEye = config_data["BattleEye"]
     Mods = config_data["Mods"]
     ForceRespawnDinos = config_data["ForceRespawnDinos"]
+    UAV = config_data["UpdateAndValidate"]
+    if UAV:
+        start_server_update()
     if(ForceRespawnDinos):
         ForceRespawnDinosValue = "ForceRespawnDinos"
     else:
@@ -347,7 +414,6 @@ def launch_ark():
 
     # Define the variables (simulating PowerShell variables)
     ARKServerPath = "C:\\GameServer\\ARK-Survival-Ascended-Server"  # Replace with your actual path
-    ServerArguments = 'start TheIsland?listen?SessionName="MyServer"?Port=7777?QueryPort=27015?ServerPassword="MyPassword"?MaxPlayers="20"?RCONEnabled=True?RCONPort=27020?ServerAdminPassword="Admin123" -True -automanagedmods -mods=Mod1,Mod2,Mod3, -True'
 
     # Construct the server path
     ServerPath = f'{ARKServerPath}\\ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe'
@@ -365,6 +431,7 @@ def launch_ark():
 def close_window():
     save_config()
     form.destroy()
+    exit()
 
 close_button = tk.Button(form, text="Close", command=close_window)
 close_button.place(x=520, y=500)
