@@ -307,6 +307,26 @@ $StartServerButton.Add_Click({
     }
 })
 
+# Backup Button
+$BackupButton = New-Object Windows.Forms.Button
+$BackupButton.Location = New-Object Drawing.Point(450, 500)
+$BackupButton.Size = New-Object Drawing.Size(80, 30)
+$BackupButton.Text = "Backup"
+$Form.Controls.Add($BackupButton)
+$BackupButton.Add_Click({
+    $downloadConfirmation = [System.Windows.Forms.MessageBox]::Show("Do you want to download the backup tool?", "Confirmation", [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Question)
+    if ($downloadConfirmation -eq [System.Windows.Forms.DialogResult]::OK) {
+        try {
+            Download-BackupTool
+            Start-Backup
+        } catch {
+            [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        }
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("Backup process canceled.", "Canceled", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+})
+
 # Function to update the GUI elements with the loaded configuration data
 function Update-GUIFromConfig {
     $SteamCMDPathTextBox.Text = $SteamCMD
@@ -346,6 +366,29 @@ if (Test-Path -Path $ScriptConfig) {
     $ConfigData = $DefaultConfig
     # Update GUI with default config data
     Update-GUIFromConfig
+}
+
+function Download-BackupTool {
+    $BackupToolURL = ""
+    $BackupToolPath = ""
+    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.2/BackupJobSchedulerGUI.msi"
+    $BackupToolPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
+    if (-not (Test-Path -Path $BackupToolPath)) {
+        Write-Output "Downloading Backup Tool..."
+        Invoke-WebRequest -Uri $BackupToolURL -OutFile $BackupToolPath
+        Write-Output "Backup Tool downloaded successfully."
+    }
+}
+
+function Start-Backup {
+    $MSIPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
+
+    try {
+        Start-Process msiexec.exe -ArgumentList "/i `"$MSIPath`"" -Wait -PassThru
+        Write-Output "MSI installation completed successfully."
+    } catch {
+        Write-Output "Error during MSI installation: $_"
+    }
 }
 
 # Function to start the ARK server
