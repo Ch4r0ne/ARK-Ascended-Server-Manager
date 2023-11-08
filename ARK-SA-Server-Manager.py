@@ -7,6 +7,7 @@ from tkinter import messagebox
 import winreg
 import zipfile
 import requests
+import threading
 
 # Define default values
 default_config = {
@@ -23,9 +24,11 @@ default_config = {
     "Mods": "",
     "RCONPort": "27020",
     "RCONEnabled": False,
-    "ForceRespawnDinos": False
+    "ForceRespawnDinos": False,
+    "UpdateAndValidate": False 
 }
 app_id = "376030"
+task_thread = None
 
 # Create configuration folder and file if not exists
 config_folder_path = os.path.join(os.getenv('APPDATA'), "ARK-Ascended-Server-Manager")
@@ -50,7 +53,8 @@ def save_config():
         "Mods": mods.get(),
         "RCONPort": rcon_port.get(),
         "RCONEnabled": rcon_enabled.get(),
-        "ForceRespawnDinos": force_respawn_dinos_var.get()
+        "ForceRespawnDinos": force_respawn_dinos_var.get(),
+        "UpdateAndValidate": update_and_validate_var.get()
     }
     
     with open(script_config, 'w') as config_file:
@@ -133,7 +137,7 @@ query_port = tk.Entry(form)
 query_port.place(x=200, y=260, width=50, height=20)
 query_port.insert(0, config_data["QueryPort"])
 
-# BattleEye
+# BattleEye (Checkbox)
 battle_eye_label = tk.Label(form, text="BattleEye:")
 battle_eye_label.place(x=50, y=290)
 
@@ -166,7 +170,7 @@ password = tk.Entry(form)
 password.place(x=200, y=350, width=150, height=20)
 password.insert(0, config_data["Password"])
 
-# RCON Enabled
+# RCON Enabled (Checkbox)
 rcon_enabled_label = tk.Label(form, text="RCON Enabled:")
 rcon_enabled_label.place(x=50, y=380)
 
@@ -192,10 +196,25 @@ force_respawn_dinos_var.set(config_data["ForceRespawnDinos"])
 force_respawn_dinos_checkbox = tk.Checkbutton(form, variable=force_respawn_dinos_var)
 force_respawn_dinos_checkbox.place(x=200, y=440)
 
+# Update/Validate on server start (Checkbox)
+update_and_validate_label = tk.Label(form, text="Update/Validate on server start:")
+update_and_validate_label.place(x=230, y=440)
+
+update_and_validate_var = tk.BooleanVar()
+update_and_validate_var.set(config_data["UpdateAndValidate"])
+update_and_validate_checkbox = tk.Checkbutton(form, variable=update_and_validate_var)
+update_and_validate_checkbox.place(x=400, y=440)
+
 # Install Button
 def install_button_click():
+    global task_thread
     save_config()
-    install_ark_server()
+    if task_thread and task_thread.is_alive():
+        print("Task is already running.")
+    else:
+        task_thread = threading.Thread(target=install_ark_server)
+        task_thread.start()
+    
     
 install_button = tk.Button(form, text="Install", command=install_button_click)
 install_button.place(x=50, y=500, width=80, height=30)
@@ -306,8 +325,8 @@ def install_ark_server():
     # Install ARK Server using SteamCMD
     print("Installing ARK Server using SteamCMD...")
     steam_cmd_path = os.path.join(steamcmd_path, "steamcmd.exe")
-    steamcmd_arguments = f"+force_install_dir {ark_server_path} +login anonymous +app_update {app_id} validate +quit"
-    subprocess.call([steam_cmd_path, steamcmd_arguments], shell=True)
+    #steamcmd_arguments = f"+force_install_dir {ark_server_path} +login anonymous +app_update {app_id} validate +quit"
+    subprocess.call([steam_cmd_path, "+force_install_dir", f"{ark_server_path}", "+login", "anonymous", "+app_update", "2430930", "+quit"], shell=True)
 
     print("ARK Server has been successfully installed.")
     
@@ -317,7 +336,14 @@ def install_ark_server():
     
 # Server Update Button
 def server_update_click():
+    global task_thread
     save_config()
+    if task_thread and task_thread.is_alive():
+        print("Task is already running.")
+    else:
+        task_thread = threading.Thread(target=start_server_update)
+        task_thread.start()
+    
     
 
 server_update_button = tk.Button(form, text="Update", command=server_update_click)
@@ -328,8 +354,8 @@ def start_server_update():
     print("Installing ARK Server using SteamCMD...")
     ark_path = config_data["ARKServerPath"]
     steam_cmd_path = os.path.join(config_data["SteamCMD"], "steamcmd.exe")
-    steamcmd_arguments = f"+force_install_dir {ark_path} +login anonymous +app_update {app_id} validate +quit"
-    subprocess.call([steam_cmd_path, steamcmd_arguments], shell=True)
+    #steamcmd_arguments = f"+force_install_dir {ark_path} +login anonymous +app_update {app_id} validate +quit"
+    subprocess.call([steam_cmd_path, "+force_install_dir", f"{ark_server_path}", "+login", "anonymous", "+app_update", "2430930", "+quit"], shell=True)
 
     print("ARK Server has been successfully installed.")
 
@@ -342,8 +368,13 @@ save_button.place(x=250, y=500, width=80, height=30)
 
 # Launch ARK Button
 def launch_ark_click():
+    global task_thread
     save_config()
-    launch_ark()
+    if task_thread and task_thread.is_alive():
+        print("Task is already running.")
+    else:
+        task_thread = threading.Thread(target=launch_ark)
+        task_thread.start()
 
 launch_ark_button = tk.Button(form, text="Launch", command=launch_ark_click)
 launch_ark_button.place(x=350, y=500, width=80, height=30)
@@ -351,7 +382,7 @@ launch_ark_button.place(x=350, y=500, width=80, height=30)
 
 def launch_ark():
     ServerMAP = config_data["ServerMAP"]
-    ServerName = config_data["ARKServerPath"]
+    ServerName = config_data["ServerName"]
     Port = config_data["Port"]
     QueryPort = config_data["QueryPort"]
     Password = config_data["Password"]
@@ -362,6 +393,9 @@ def launch_ark():
     BattleEye = config_data["BattleEye"]
     Mods = config_data["Mods"]
     ForceRespawnDinos = config_data["ForceRespawnDinos"]
+    UAV = config_data["UpdateAndValidate"]
+    if UAV:
+        start_server_update()
     if(ForceRespawnDinos):
         ForceRespawnDinosValue = "ForceRespawnDinos"
     else:
@@ -397,6 +431,7 @@ def launch_ark():
 def close_window():
     save_config()
     form.destroy()
+    exit()
 
 close_button = tk.Button(form, text="Close", command=close_window)
 close_button.place(x=520, y=500)
