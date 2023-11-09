@@ -278,14 +278,6 @@ def install_ark_server():
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-    # Download SteamCMD
-    print("Downloading SteamCMD...")
-    response = requests.get(steamcmd_url, stream=True)
-    with open('steamcmd.zip', 'wb') as file:
-        for chunk in response.iter_content(chunk_size=1024):
-            if chunk:
-                file.write(chunk)
-
     def is_vc_redist_installed():
         try:
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64")
@@ -301,9 +293,18 @@ def install_ark_server():
             return True
         except FileNotFoundError:
             return False
+        
+    def downlaod_file(url, target_path = os.path.join(os.environ['TEMP'])):
+        response = requests.get(url, stream=True)
+        with open(target_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=1024):
+                if chunk:
+                    file.write(chunk)
 
     def install_component(url, output_file, arguments):
-        subprocess.run([output_file, "/install"] + arguments)
+        component_path = os.path.join(os.environ['TEMP'], output_file)
+        downlaod_file(url)
+        subprocess.run([component_path, "/install"] + arguments)
 
     if not is_vc_redist_installed():
         install_component(vcRedistUrl, "vc_redist.x64.exe", ["/passive", "/norestart"])
@@ -315,17 +316,20 @@ def install_ark_server():
     else:
         print("DirectX Runtime already installed.")
 
-    # Extract SteamCMD to its location
-    with zipfile.ZipFile('steamcmd.zip', 'r') as zip_ref:
-        zip_ref.extractall(steamcmd_path)
+    # Download SteamCMD
+    if os.path.exists(os.path.join(steamcmd_path, 'steamcmd.exe')):
+        print("Downloading SteamCMD...")
+        downlaod_file(steamcmd_url)
 
-    # Remove the downloaded zip file
-    os.remove('steamcmd.zip')
+        # Extract SteamCMD to its location
+        with zipfile.ZipFile(os.path.join(os.environ['TEMP'],'steamcmd.zip'), 'r') as zip_ref:
+            zip_ref.extractall(steamcmd_path)
+
+        os.remove('steamcmd.zip')
 
     # Install ARK Server using SteamCMD
     print("Installing ARK Server using SteamCMD...")
     steam_cmd_path = os.path.join(steamcmd_path, "steamcmd.exe")
-    #steamcmd_arguments = f"+force_install_dir {ark_server_path} +login anonymous +app_update {app_id} validate +quit"
     subprocess.call([steam_cmd_path, "+force_install_dir", f"{ark_server_path}", "+login", "anonymous", "+app_update", "2430930", "+quit"], shell=True)
 
     print("ARK Server has been successfully installed.")
