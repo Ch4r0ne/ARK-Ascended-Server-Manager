@@ -90,6 +90,23 @@ $Form = New-Object Windows.Forms.Form
 $Form.Text = "ARK-Ascended-Server-Manager"
 $Form.Size = New-Object Drawing.Size(1000, 600)
 
+# Label to display player count
+$PlayerCountLabel = New-Object Windows.Forms.Label
+$PlayerCountLabel.Text = "Players Online: 0/$MaxPlayers"
+#$PlayerCountLabel.AutoSize = $true
+$PlayerCountLabel.Location = New-Object Drawing.Point(10, 10)
+$Form.Controls.Add($PlayerCountLabel)
+
+# Button to trigger player count update
+$UpdatePlayerCountButton = New-Object Windows.Forms.Button
+$UpdatePlayerCountButton.Location = New-Object Drawing.Point(120, 10)
+$UpdatePlayerCountButton.Size = New-Object Drawing.Size(80, 30)
+$UpdatePlayerCountButton.Text = "Update Player Count"
+$UpdatePlayerCountButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Standard
+$UpdatePlayerCountButton.Add_Click({ Get-PlayerCount })
+$Form.Controls.Add($UpdatePlayerCountButton)
+
+
 # SteamCMD path
 $SteamCMDLabel = New-Object Windows.Forms.Label
 $SteamCMDLabel.Text = "SteamCMD Pfad:"
@@ -496,6 +513,33 @@ if (Test-Path -Path $ScriptConfig) {
     $ConfigData = $DefaultConfig
     # Update GUI with default config data
     Update-GUIFromConfig
+}
+
+# Function to get player count using RCON
+function Get-PlayerCount {
+    try {
+        # Validate user inputs
+        if (-not $ServerIP -or -not $AdminPassword) {
+            throw "Server IP and Admin Password are required."
+        }
+
+        # RCON command to get player list
+        $getPlayerCountCommand = "listplayers"
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $getPlayerCountCommand
+
+        # Check if the output contains "No Players Connected"
+        if ($mcrconOutput -match "No Players Connected") {
+            $playerCount = 0
+        } else {
+            # Count the number of lines in the output, each line represents a player
+            $playerCount = $mcrconOutput.Count
+        }
+
+        # Update the PlayerCountLabel
+        $PlayerCountLabel.Text = "Players Online: $playerCount/$MaxPlayers"
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
 }
 
 
