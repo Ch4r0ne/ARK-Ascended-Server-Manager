@@ -358,7 +358,6 @@ $BackupButton.Add_Click({
     if ($downloadConfirmation -eq [System.Windows.Forms.DialogResult]::OK) {
         try {
             Download-BackupTool
-            Start-Backup
         } catch {
             [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         }
@@ -501,30 +500,51 @@ function Send-RconCommand {
     }
 }
 
-# Function Start Backup Tool
-function Start-Backup {
-    $MSIPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
-
-    try {
-        Start-Process msiexec.exe -ArgumentList "/i `"$MSIPath`"" -Wait -PassThru
-        Write-Output "MSI installation completed successfully."
-    } catch {
-        Write-Output "Error during MSI installation: $_"
-    }
-}
-
-# Function Downloade Backup Tool
+# Function Download Backup Tool
 function Download-BackupTool {
-    $BackupToolURL = ""
-    $BackupToolPath = ""
     $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.2/BackupJobSchedulerGUI.msi"
-    $BackupToolPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
-    if (-not (Test-Path -Path $BackupToolPath)) {
-        Write-Output "Downloading Backup Tool..."
-        Invoke-WebRequest -Uri $BackupToolURL -OutFile $BackupToolPath
-        Write-Output "Backup Tool downloaded successfully."
+    
+    # Extrahiere den Dateinamen aus der URL
+    $fileName = [System.IO.Path]::GetFileName($BackupToolURL)
+    
+    # Ask user for download location
+    $downloadPath = Get-SaveFileLocation -Title "Select download location" -Filter "MSI Files (*.msi)|*.msi" -FileName $fileName
+
+    # Check if the user selected a location
+    if ($downloadPath -ne "") {
+        Write-Output "Downloading Backup Tool to $downloadPath..."
+        Invoke-WebRequest -Uri $BackupToolURL -OutFile $downloadPath
+        Write-Output "Backup Tool downloaded successfully to $downloadPath."
+    } else {
+        Write-Output "Download canceled by user."
     }
 }
+
+# Function to show Save File Dialog
+function Get-SaveFileLocation {
+    param (
+        [string]$Title,
+        [string]$Filter,
+        [string]$FileName
+    )
+
+    [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null
+
+    $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+    $saveFileDialog.Title = $Title
+    $saveFileDialog.Filter = $Filter
+    $saveFileDialog.FileName = $FileName
+
+    $result = $saveFileDialog.ShowDialog()
+
+    if ($result -eq "OK" -or $result -eq "Yes") {
+        return $saveFileDialog.FileName
+    } else {
+        return ""
+    }
+}
+
+
 
 # Function to start the ARK server
 function Start-ARKServer {
