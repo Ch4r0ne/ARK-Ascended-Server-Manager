@@ -284,32 +284,6 @@ $ConsoleOutputTextBox.ScrollBars = "Vertical"
 $ConsoleOutputTextBox.ReadOnly = $true
 $Form.Controls.Add($ConsoleOutputTextBox)
 
-# Send button for the RCON command
-$buttonSend = New-Object Windows.Forms.Button
-$buttonSend.Text = "Send"
-$buttonSend.Location = New-Object Drawing.Point(875, 50)
-$Form.Controls.Add($buttonSend)
-$buttonSend.Add_Click({
-    Get-Mcrcon
-    try {
-        # Validate user inputs
-        if (-not $ServerIP -or -not $AdminPassword) {
-            throw "Server IP and Admin Password are required."
-        }
-
-        $rconCommand = $CommandTextBox.Text
-        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $rconCommand
-
-        # Write the RCON input into the RichTextBox
-        $ConsoleOutputTextBox.AppendText("Command: $rconCommand`r`n")
-
-        # Write the RCON output to the RichTextBox
-        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`r`n")`r`n")
-    } catch {
-        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    }
-})
-
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
 $InstallButton.Location = New-Object Drawing.Point(50, 500)
@@ -343,7 +317,7 @@ $ServerUpdateButton.Add_Click({
 $SaveButton = New-Object Windows.Forms.Button
 $SaveButton.Location = New-Object Drawing.Point(250, 500)
 $SaveButton.Size = New-Object Drawing.Size(80, 30)
-$SaveButton.Text = "Save"
+$SaveButton.Text = "Save Config"
 $Form.Controls.Add($SaveButton)
 $SaveButton.Add_Click({
     try {
@@ -359,7 +333,7 @@ $SaveButton.Add_Click({
 $StartServerButton = New-Object Windows.Forms.Button
 $StartServerButton.Location = New-Object Drawing.Point(350, 500)
 $StartServerButton.Size = New-Object Drawing.Size(80, 30)
-$StartServerButton.Text = "Start"
+$StartServerButton.Text = "Start Server"
 $Form.Controls.Add($StartServerButton)
 $StartServerButton.Add_Click({
     try {
@@ -375,7 +349,7 @@ $StartServerButton.Add_Click({
 
 # Backup Button
 $BackupButton = New-Object Windows.Forms.Button
-$BackupButton.Location = New-Object Drawing.Point(450, 500)
+$BackupButton.Location = New-Object Drawing.Point(875, 500)
 $BackupButton.Size = New-Object Drawing.Size(80, 30)
 $BackupButton.Text = "Backup"
 $Form.Controls.Add($BackupButton)
@@ -390,6 +364,60 @@ $BackupButton.Add_Click({
         }
     } else {
         [System.Windows.Forms.MessageBox]::Show("Backup process canceled.", "Canceled", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+})
+
+# Send button for the RCON command
+$buttonSend = New-Object Windows.Forms.Button
+$buttonSend.Text = "Send"
+$buttonSend.Location = New-Object Drawing.Point(875, 50)
+$Form.Controls.Add($buttonSend)
+$buttonSend.Add_Click({
+    Get-Mcrcon
+    try {
+        # Validate user inputs
+        if (-not $ServerIP -or -not $AdminPassword) {
+            throw "Server IP and Admin Password are required."
+        }
+
+        $rconCommand = $CommandTextBox.Text
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $rconCommand
+
+        # Write the RCON input into the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Command: $rconCommand`r`n")
+
+        # Write the RCON output to the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`r`n")`r`n")
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
+# Stop Server button
+$buttonStopServer = New-Object Windows.Forms.Button
+$buttonStopServer.Location = New-Object Drawing.Point(450, 500)
+$buttonStopServer.Size = New-Object Drawing.Size(80, 30)
+$buttonStopServer.Text = "Stop Server"
+$Form.Controls.Add($buttonStopServer)
+$buttonStopServer.Add_Click({
+    Get-Mcrcon
+    try {
+        # Validate user inputs
+        if (-not $ServerIP -or -not $AdminPassword) {
+            throw "Server IP and Admin Password are required."
+        }
+
+        # Stop server command
+        $stopServerCommand = "doexit"
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $stopServerCommand
+
+        # Write the RCON input into the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Command: $stopServerCommand`r`n")
+
+        # Write the RCON output to the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`r`n")`r`n")
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
 })
 
