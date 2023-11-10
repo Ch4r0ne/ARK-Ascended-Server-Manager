@@ -301,10 +301,10 @@ $buttonSend.Add_Click({
         $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $rconCommand
 
         # Write the RCON input into the RichTextBox
-        $ConsoleOutputTextBox.AppendText("Command: $rconCommand`n")
+        $ConsoleOutputTextBox.AppendText("Command: $rconCommand`r`n")
 
         # Write the RCON output to the RichTextBox
-        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`n")`n")
+        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`r`n")`r`n")
     } catch {
         [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
@@ -464,7 +464,10 @@ function Send-RconCommand {
         # Connect to the server via RCON and send the command
         $mcrconOutput = Invoke-Expression "$mcrconPath -H $ServerIP -P $RCONPort -p '$AdminPassword' '$Command'"
 
-        return $mcrconOutput -split "`n"
+        # Replace all newline characters with `n` in the output
+        $mcrconOutput = $mcrconOutput -replace "`r`n|`r|`n|`n", "`n"
+
+        return "$mcrconOutput`n"
     } catch {
         throw "An error occurred: $_"
     }
