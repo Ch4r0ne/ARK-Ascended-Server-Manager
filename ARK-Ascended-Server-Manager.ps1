@@ -17,6 +17,7 @@ $DefaultConfig = @{
     RCONPort = "27020"
     RCONEnabled = "False"
     ForceRespawnDinos = $false  # Set the default value as a boolean"
+    ServerIP = "localhost"
 }
 
 # Create configuration folder and file if not exists
@@ -44,6 +45,7 @@ function Save-Config {
         RCONPort = $RCONPortTextBox.Text
         RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
         ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+        ServerIP = $ServerIPTextBox.Text
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -81,11 +83,12 @@ $Mods = $ConfigData.Mods
 $RCONPort = $ConfigData.RCONPort
 $RCONEnabled = $ConfigData.RCONEnabled
 $ForceRespawnDinos = $ConfigData.ForceRespawnDinos
+$ServerIP = $ConfigData.ServerIP
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
 $Form.Text = "ARK-Ascended-Server-Manager"
-$Form.Size = New-Object Drawing.Size(600, 600)
+$Form.Size = New-Object Drawing.Size(1000, 600)
 
 # SteamCMD path
 $SteamCMDLabel = New-Object Windows.Forms.Label
@@ -141,6 +144,17 @@ $MaxPlayersTextBox = New-Object Windows.Forms.TextBox
 $MaxPlayersTextBox.Location = New-Object Drawing.Point(200, 170)
 $MaxPlayersTextBox.Size = New-Object Drawing.Size(50, 20)
 $Form.Controls.Add($MaxPlayersTextBox)
+
+# Server IP
+$ServerIPLabel = New-Object Windows.Forms.Label
+$ServerIPLabel.Text = "Server IP:"
+$ServerIPLabel.Location = New-Object Drawing.Point(50, 200)
+$Form.Controls.Add($ServerIPLabel)
+
+$ServerIPTextBox = New-Object Windows.Forms.TextBox
+$ServerIPTextBox.Location = New-Object Drawing.Point(200, 200)
+$ServerIPTextBox.Size = New-Object Drawing.Size(150, 20)
+$Form.Controls.Add($ServerIPTextBox)
 
 # Port
 $PortLabel = New-Object Windows.Forms.Label
@@ -244,6 +258,58 @@ $ForceRespawnDinosCheckBox.Location = New-Object Drawing.Point(200, 440)
 $ForceRespawnDinosCheckBox.Size = New-Object Drawing.Size(20, 20)
 $Form.Controls.Add($ForceRespawnDinosCheckBox)
 
+# Command Input Field
+$CommandLabel = New-Object Windows.Forms.Label
+$CommandLabel.Text = "Enter Command:"
+$CommandLabel.AutoSize = $true
+$CommandLabel.Location = New-Object Drawing.Point(550, 50)
+$Form.Controls.Add($CommandLabel)
+
+$CommandTextBox = New-Object Windows.Forms.TextBox
+$CommandTextBox.Location = New-Object Drawing.Point(650, 50)
+$CommandTextBox.Size = New-Object Drawing.Size(220, 20)
+$Form.Controls.Add($CommandTextBox)
+
+# Console Output Field
+$ConsoleOutputLabel = New-Object Windows.Forms.Label
+$ConsoleOutputLabel.Text = "Console Output:"
+$ConsoleOutputLabel.Location = New-Object Drawing.Point(50, 110)
+$Form.Controls.Add($ConsoleOutputLabel)
+
+$ConsoleOutputTextBox = New-Object Windows.Forms.TextBox
+$ConsoleOutputTextBox.Location = New-Object Drawing.Point(550, 80)
+$ConsoleOutputTextBox.Size = New-Object Drawing.Size(400, 100)
+$ConsoleOutputTextBox.Multiline = $true
+$ConsoleOutputTextBox.ScrollBars = "Vertical"
+$ConsoleOutputTextBox.ReadOnly = $true
+$Form.Controls.Add($ConsoleOutputTextBox)
+
+# Send button for the RCON command
+$buttonSend = New-Object Windows.Forms.Button
+$buttonSend.Text = "Send"
+$buttonSend.Location = New-Object Drawing.Point(875, 50)
+$Form.Controls.Add($buttonSend)
+$buttonSend.Add_Click({
+    Get-Mcrcon
+    try {
+        # Validate user inputs
+        if (-not $ServerIP -or -not $AdminPassword) {
+            throw "Server IP and Admin Password are required."
+        }
+
+        $rconCommand = $CommandTextBox.Text
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $rconCommand
+
+        # Write the RCON input into the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Command: $rconCommand`n")
+
+        # Write the RCON output to the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`n")`n")
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
 $InstallButton.Location = New-Object Drawing.Point(50, 500)
@@ -343,6 +409,7 @@ function Update-GUIFromConfig {
     $RCONPortTextBox.Text = $RCONPort
     $RCONEnabledComboBox.SelectedItem = $RCONEnabled
     $ForceRespawnDinosCheckBox.Checked = [System.Boolean]::Parse($ConfigData.ForceRespawnDinos)  # Set checkbox value based on the saved boolean value
+    $ServerIPTextBox.Text =  $ServerIP
 
 }
 
@@ -368,6 +435,54 @@ if (Test-Path -Path $ScriptConfig) {
     Update-GUIFromConfig
 }
 
+
+# Function to download and extract mcrcon.exe
+function Get-Mcrcon {
+    $mcrconPath = Join-Path $env:TEMP "mcrcon.exe"
+    if (-not (Test-Path -Path $mcrconPath)) {
+        $downloadURL = "https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-windows-x86-64.zip"
+        $zipPath = Join-Path $env:TEMP "mcrcon.zip"
+        Invoke-RestMethod -Uri $downloadURL -OutFile $zipPath
+        Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
+        Remove-Item -Path $zipPath -Force
+    }
+    return $mcrconPath
+}
+
+# Function to send RCON command
+function Send-RconCommand {
+    param (
+        [string]$ServerIP,
+        [int]$RCONPort,
+        [string]$AdminPassword,
+        [string]$Command
+    )
+
+    try {
+        $mcrconPath = Get-Mcrcon
+
+        # Connect to the server via RCON and send the command
+        $mcrconOutput = Invoke-Expression "$mcrconPath -H $ServerIP -P $RCONPort -p '$AdminPassword' '$Command'"
+
+        return $mcrconOutput -split "`n"
+    } catch {
+        throw "An error occurred: $_"
+    }
+}
+
+# Function Start Backup Tool
+function Start-Backup {
+    $MSIPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
+
+    try {
+        Start-Process msiexec.exe -ArgumentList "/i `"$MSIPath`"" -Wait -PassThru
+        Write-Output "MSI installation completed successfully."
+    } catch {
+        Write-Output "Error during MSI installation: $_"
+    }
+}
+
+# Function Downloade Backup Tool
 function Download-BackupTool {
     $BackupToolURL = ""
     $BackupToolPath = ""
@@ -377,17 +492,6 @@ function Download-BackupTool {
         Write-Output "Downloading Backup Tool..."
         Invoke-WebRequest -Uri $BackupToolURL -OutFile $BackupToolPath
         Write-Output "Backup Tool downloaded successfully."
-    }
-}
-
-function Start-Backup {
-    $MSIPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
-
-    try {
-        Start-Process msiexec.exe -ArgumentList "/i `"$MSIPath`"" -Wait -PassThru
-        Write-Output "MSI installation completed successfully."
-    } catch {
-        Write-Output "Error during MSI installation: $_"
     }
 }
 
@@ -467,6 +571,7 @@ function Update-Config {
     $ConfigData.RCONPort = $RCONPortTextBox.Text
     $ConfigData.RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
     $ConfigData.ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+    $ConfigData.ServerIP = $ServerIPTextBox.Text  # Save Server IP
 
 
     # Update global variables with new values
@@ -484,6 +589,7 @@ function Update-Config {
     $script:RCONPort = $ConfigData.RCONPort
     $script:RCONEnabled = $ConfigData.RCONEnabled
     $script:ForceRespawnDinos = $ConfigData.ForceRespawnDinos  # Assign boolean value directly
+    $script:ServerIP = $ConfigData.ServerIP  # Assign Server IP
 
     Save-Config
 }
@@ -493,6 +599,9 @@ function Install-ARKServer {
     try {
         # Update configuration settings
         Update-Config
+        # Downloade Mcrcon
+        Get-Mcrcon
+
 
         # Configuration settings
         $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
