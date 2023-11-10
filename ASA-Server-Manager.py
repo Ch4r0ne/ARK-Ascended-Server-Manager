@@ -1083,6 +1083,7 @@ class ServerManagerApp:
         server_path = f'{ARKServerPath}\\ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe'
 
 
+
         if server_arguments.strip():
             try:
                 subprocess.Popen([server_path] + server_arguments.split(), shell=False)
