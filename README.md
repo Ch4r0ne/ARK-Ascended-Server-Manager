@@ -16,11 +16,11 @@ ARK Ascended Server Manager is a powerful PowerShell script that simplifies the 
 
 Developed for Windows Server 2022/2019
 
-![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
+![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview.png)
 
 ## Automatic backup with backup tool
 
-I have developed another tool for the project, which is available as [Backup-Tool](https://github.com/Ch4r0ne/Backup-Tool). It was designed specifically for this project and offers an efficient and user-friendly solution for automatic data backup. The backup button start this tool.
+I have developed another tool for the project, which is available as [Backup-Tool](https://github.com/Ch4r0ne/Backup-Tool). It was designed specifically for this project and offers an efficient and user-friendly solution for automatic data backup.
 
 ![BackupJobSchedulerGUI.png](Preview/BackupJobSchedulerGUI.png)
 
