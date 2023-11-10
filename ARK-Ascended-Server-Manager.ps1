@@ -15,7 +15,7 @@ $DefaultConfig = @{
     Password = ""
     Mods= ""
     RCONPort = "27020"
-    RCONEnabled = "False"
+    RCONEnabled = "True"
     ForceRespawnDinos = $false  # Set the default value as a boolean"
     ServerIP = "localhost"
 }
@@ -420,6 +420,42 @@ $buttonStopServer.Add_Click({
     }
 })
 
+# Open GameUserSettings.ini button
+$buttonOpenGameUserSettings = New-Object Windows.Forms.Button
+$buttonOpenGameUserSettings.Location = New-Object Drawing.Point(550, 200)
+$buttonOpenGameUserSettings.Size = New-Object Drawing.Size(200, 30)
+$buttonOpenGameUserSettings.Text = "Open GameUserSettings.ini"
+$buttonOpenGameUserSettings.FlatStyle = [System.Windows.Forms.FlatStyle]::Popup  # Modified button style
+$buttonOpenGameUserSettings.Add_Click({
+    $ARKServerPath = "C:\GameServer\ARK-Survival-Ascended-Server"
+    $GameUserSettingsPath = Join-Path $ARKServerPath "ShooterGame\Saved\Config\WindowsServer\GameUserSettings.ini"
+
+    if (-not (Test-Path -Path $GameUserSettingsPath)) {
+        New-Item -ItemType File -Path $GameUserSettingsPath
+    }
+
+    Invoke-Item $GameUserSettingsPath
+})
+$Form.Controls.Add($buttonOpenGameUserSettings)
+
+# Open Game.ini button
+$buttonOpenGameIni = New-Object Windows.Forms.Button
+$buttonOpenGameIni.Location = New-Object Drawing.Point(760, 200)
+$buttonOpenGameIni.Size = New-Object Drawing.Size(200, 30)
+$buttonOpenGameIni.Text = "Open Game.ini"
+$buttonOpenGameIni.FlatStyle = [System.Windows.Forms.FlatStyle]::Popup  # Modified button style
+$buttonOpenGameIni.Add_Click({
+    $ARKServerPath = "C:\GameServer\ARK-Survival-Ascended-Server"
+    $GameIniPath = Join-Path $ARKServerPath "ShooterGame\Saved\Config\WindowsServer\Game.ini"
+
+    if (-not (Test-Path -Path $GameIniPath)) {
+        New-Item -ItemType File -Path $GameIniPath
+    }
+
+    Invoke-Item $GameIniPath
+})
+$Form.Controls.Add($buttonOpenGameIni)
+
 # Function to update the GUI elements with the loaded configuration data
 function Update-GUIFromConfig {
     $SteamCMDPathTextBox.Text = $SteamCMD
@@ -543,8 +579,6 @@ function Get-SaveFileLocation {
         return ""
     }
 }
-
-
 
 # Function to start the ARK server
 function Start-ARKServer {
