@@ -386,6 +386,116 @@ $BackupButton.Add_Click({
     }
 })
 
+# Create Auto Update Job button
+$buttonAutoUpdateJob = New-Object Windows.Forms.Button
+$buttonAutoUpdateJob.Location = New-Object Drawing.Point(700, 500)
+$buttonAutoUpdateJob.Size = New-Object Drawing.Size(150, 30)
+$buttonAutoUpdateJob.Text = "Create Auto-Update Job"
+$Form.Controls.Add($buttonAutoUpdateJob)
+$buttonAutoUpdateJob.Add_Click({
+    function Create-AutoUpdateJob {
+        param (
+            [string]$TaskName,
+            [string]$ScriptPath,
+            [string]$ConfigFolderPath
+        )
+
+        # Create a form for better user interaction
+        $form = New-Object Windows.Forms.Form
+        $form.Text = "Create Auto-Update Job"
+        $form.Size = New-Object Drawing.Size(400, 200)
+        $form.StartPosition = "CenterScreen"
+
+        $label = New-Object Windows.Forms.Label
+        $label.Location = New-Object Drawing.Point(10, 20)
+        $label.Size = New-Object Drawing.Size(380, 20)
+        $label.Text = "Please enter the details for the Auto-Update job:"
+
+        $labelTime = New-Object Windows.Forms.Label
+        $labelTime.Location = New-Object Drawing.Point(10, 50)
+        $labelTime.Size = New-Object Drawing.Size(100, 20)
+        $labelTime.Text = "Scheduled Time:"
+
+        $dateTimePicker = New-Object Windows.Forms.DateTimePicker
+        $dateTimePicker.Location = New-Object Drawing.Point(120, 50)
+        $dateTimePicker.Format = [Windows.Forms.DateTimePickerFormat]::Custom
+        $dateTimePicker.CustomFormat = "HH:mm"
+
+        $labelTaskName = New-Object Windows.Forms.Label
+        $labelTaskName.Location = New-Object Drawing.Point(10, 80)
+        $labelTaskName.Size = New-Object Drawing.Size(100, 20)
+        $labelTaskName.Text = "Task Name:"
+
+        $textBoxTaskName = New-Object Windows.Forms.TextBox
+        $textBoxTaskName.Location = New-Object Drawing.Point(120, 80)
+        $textBoxTaskName.Size = New-Object Drawing.Size(200, 20)
+
+        $buttonOK = New-Object Windows.Forms.Button
+        $buttonOK.Location = New-Object Drawing.Point(120, 120)
+        $buttonOK.Size = New-Object Drawing.Size(75, 23)
+        $buttonOK.Text = "OK"
+        $buttonOK.DialogResult = [Windows.Forms.DialogResult]::OK
+
+        $buttonCancel = New-Object Windows.Forms.Button
+        $buttonCancel.Location = New-Object Drawing.Point(220, 120)
+        $buttonCancel.Size = New-Object Drawing.Size(75, 23)
+        $buttonCancel.Text = "Cancel"
+        $buttonCancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
+
+        # Add controls to the form
+        $form.Controls.Add($label)
+        $form.Controls.Add($labelTime)
+        $form.Controls.Add($dateTimePicker)
+        $form.Controls.Add($labelTaskName)
+        $form.Controls.Add($textBoxTaskName)
+        $form.Controls.Add($buttonOK)
+        $form.Controls.Add($buttonCancel)
+
+        # Show the form
+        $result = $form.ShowDialog()
+
+        if ($result -eq [Windows.Forms.DialogResult]::OK) {
+            $selectedTime = $dateTimePicker.Value.ToString("HH:mm")
+            $selectedTaskName = $textBoxTaskName.Text
+
+            # Download AutoUpdateJob.ps1 from GitHub if it does not exist
+            $autoUpdateScriptPath = Join-Path $ScriptPath "AutoUpdateJob.ps1"
+            if (-not (Test-Path $autoUpdateScriptPath)) {
+                $downloadUrl = "https://raw.githubusercontent.com/Ch4r0ne/ARK-Ascended-Server-Manager/main/AutoUpdateJob.ps1"
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $autoUpdateScriptPath
+            }
+
+            # Create scheduled task
+            $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "$autoUpdateScriptPath"
+            $taskTrigger = New-ScheduledTaskTrigger -Daily -At $selectedTime
+
+            Register-ScheduledTask -Action $taskAction -Trigger $taskTrigger -TaskName "$TaskName - $selectedTaskName" -Force
+        }
+    }
+
+    # Define script and task names
+    $scriptPath = $ConfigFolderPath
+    $taskName = "AutoUpdateJob"
+
+    # Check if task with the same name already exists
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+    if ($existingTask -ne $null) {
+        $result = [Windows.Forms.MessageBox]::Show("A task with the name $taskName already exists. Do you want to overwrite it?", "Warning", [Windows.Forms.MessageBoxButtons]::YesNo, [Windows.Forms.MessageBoxIcon]::Warning)
+
+        if ($result -eq [Windows.Forms.DialogResult]::No) {
+            return
+        }
+    }
+
+    # Create Auto-Update job
+    Create-AutoUpdateJob -TaskName $taskName -ScriptPath $scriptPath -ConfigFolderPath $ConfigFolderPath
+
+    [Windows.Forms.MessageBox]::Show("Auto-Update job created successfully.", "Success", [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)
+})
+
+
+
 # Send button for the RCON command
 $buttonSend = New-Object Windows.Forms.Button
 $buttonSend.Text = "Send"
