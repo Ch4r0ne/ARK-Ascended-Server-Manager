@@ -59,5 +59,5 @@ $ServerPath = Join-Path -Path $ConfigData.ARKServerPath -ChildPath "ShooterGame\
 if (-not [string]::IsNullOrWhiteSpace($ServerArguments)) {
     Start-Process -FilePath $ServerPath -ArgumentList $ServerArguments -NoNewWindow
 } else {
-    Write-Output "Fehler: ServerArguments are null or spaces."
+    Write-Output "Error: ServerArguments are null or spaces."
 }
