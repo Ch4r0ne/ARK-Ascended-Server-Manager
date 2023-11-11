@@ -23,8 +23,6 @@ Developed for Windows Server 2022/2019
 
 I have developed another tool for the project, which is available as [Backup-Tool](https://github.com/Ch4r0ne/Backup-Tool). It was designed specifically for this project and offers an efficient and user-friendly solution for automatic data backup.
 
-![BackupJobSchedulerGUI.png](Preview/BackupJobSchedulerGUI.png)
-
 ## Port forward Ports
 Port = 27015 - UDP (default port is 7777)
 QueryPort = 27016 - TCP (currently not yet in use)
