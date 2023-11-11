@@ -103,7 +103,10 @@ $UpdatePlayerCountButton.Location = New-Object Drawing.Point(120, 10)
 $UpdatePlayerCountButton.Size = New-Object Drawing.Size(80, 30)
 $UpdatePlayerCountButton.Text = "Update Player Count"
 $UpdatePlayerCountButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Standard
-$UpdatePlayerCountButton.Add_Click({ Get-PlayerCount })
+$UpdatePlayerCountButton.Add_Click({ 
+    Get-PlayerCount
+    Get-Mcrcon
+})
 $Form.Controls.Add($UpdatePlayerCountButton)
 
 
@@ -444,7 +447,6 @@ $buttonOpenGameUserSettings.Size = New-Object Drawing.Size(200, 30)
 $buttonOpenGameUserSettings.Text = "Open GameUserSettings.ini"
 $buttonOpenGameUserSettings.FlatStyle = [System.Windows.Forms.FlatStyle]::Popup  # Modified button style
 $buttonOpenGameUserSettings.Add_Click({
-    $ARKServerPath = "C:\GameServer\ARK-Survival-Ascended-Server"
     $GameUserSettingsPath = Join-Path $ARKServerPath "ShooterGame\Saved\Config\WindowsServer\GameUserSettings.ini"
 
     if (-not (Test-Path -Path $GameUserSettingsPath)) {
@@ -462,11 +464,154 @@ $buttonOpenGameIni.Size = New-Object Drawing.Size(200, 30)
 $buttonOpenGameIni.Text = "Open Game.ini"
 $buttonOpenGameIni.FlatStyle = [System.Windows.Forms.FlatStyle]::Popup  # Modified button style
 $buttonOpenGameIni.Add_Click({
-    $ARKServerPath = "C:\GameServer\ARK-Survival-Ascended-Server"
     $GameIniPath = Join-Path $ARKServerPath "ShooterGame\Saved\Config\WindowsServer\Game.ini"
 
+    # Check if Game.ini exists
     if (-not (Test-Path -Path $GameIniPath)) {
-        New-Item -ItemType File -Path $GameIniPath
+        # Create an empty Game.ini
+        New-Item -ItemType File -Path $GameIniPath | Out-Null
+    }
+
+    # Read the content of Game.ini
+    $gameIniContent = Get-Content $GameIniPath -Raw -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrEmpty($gameIniContent)) {
+        # Write default content to Game.ini if it's empty
+        @"
+[/Script/ShooterGame.ShooterGameMode]
+BabyImprintingStatScaleMultiplier=1
+BabyCuddleIntervalMultiplier=1
+BabyCuddleGracePeriodMultiplier=1
+BabyCuddleLoseImprintQualitySpeedMultiplier=1
+PerLevelStatsMultiplier_DinoTamed[0]=0.200000003
+PerLevelStatsMultiplier_DinoTamed[1]=1
+PerLevelStatsMultiplier_DinoTamed[2]=1
+PerLevelStatsMultiplier_DinoTamed[3]=1
+PerLevelStatsMultiplier_DinoTamed[4]=1
+PerLevelStatsMultiplier_DinoTamed[5]=1
+PerLevelStatsMultiplier_DinoTamed[6]=1
+PerLevelStatsMultiplier_DinoTamed[7]=1
+PerLevelStatsMultiplier_DinoTamed[8]=0.173999995
+PerLevelStatsMultiplier_DinoTamed[9]=1
+PerLevelStatsMultiplier_DinoTamed[10]=1
+PerLevelStatsMultiplier_DinoTamed_Add[0]=0.140000001
+PerLevelStatsMultiplier_DinoTamed_Add[1]=1
+PerLevelStatsMultiplier_DinoTamed_Add[2]=1
+PerLevelStatsMultiplier_DinoTamed_Add[3]=1
+PerLevelStatsMultiplier_DinoTamed_Add[4]=1
+PerLevelStatsMultiplier_DinoTamed_Add[5]=1
+PerLevelStatsMultiplier_DinoTamed_Add[6]=1
+PerLevelStatsMultiplier_DinoTamed_Add[7]=1
+PerLevelStatsMultiplier_DinoTamed_Add[8]=0.140000001
+PerLevelStatsMultiplier_DinoTamed_Add[9]=1
+PerLevelStatsMultiplier_DinoTamed_Add[10]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[0]=0.439999998
+PerLevelStatsMultiplier_DinoTamed_Affinity[1]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[2]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[3]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[4]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[5]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[6]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[7]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[8]=0.439999998
+PerLevelStatsMultiplier_DinoTamed_Affinity[9]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[10]=1
+PerLevelStatsMultiplier_DinoWild[0]=1
+PerLevelStatsMultiplier_DinoWild[1]=1
+PerLevelStatsMultiplier_DinoWild[2]=1
+PerLevelStatsMultiplier_DinoWild[3]=1
+PerLevelStatsMultiplier_DinoWild[4]=1
+PerLevelStatsMultiplier_DinoWild[5]=1
+PerLevelStatsMultiplier_DinoWild[6]=1
+PerLevelStatsMultiplier_DinoWild[7]=1
+PerLevelStatsMultiplier_DinoWild[8]=1
+PerLevelStatsMultiplier_DinoWild[9]=1
+PerLevelStatsMultiplier_DinoWild[10]=1
+PerLevelStatsMultiplier_Player[0]=1
+PerLevelStatsMultiplier_Player[1]=1
+PerLevelStatsMultiplier_Player[2]=1
+PerLevelStatsMultiplier_Player[3]=1
+PerLevelStatsMultiplier_Player[4]=1
+PerLevelStatsMultiplier_Player[5]=1
+PerLevelStatsMultiplier_Player[6]=1
+PerLevelStatsMultiplier_Player[7]=1
+PerLevelStatsMultiplier_Player[8]=1
+PerLevelStatsMultiplier_Player[9]=1
+PerLevelStatsMultiplier_Player[10]=1
+GlobalSpoilingTimeMultiplier=0
+GlobalItemDecompositionTimeMultiplier=0
+GlobalCorpseDecompositionTimeMultiplier=6
+PvPZoneStructureDamageMultiplier=6
+StructureDamageRepairCooldown=180
+IncreasePvPRespawnIntervalCheckPeriod=300
+IncreasePvPRespawnIntervalMultiplier=2
+IncreasePvPRespawnIntervalBaseAmount=59.9999809
+ResourceNoReplenishRadiusPlayers=1
+ResourceNoReplenishRadiusStructures=1
+CropGrowthSpeedMultiplier=1
+LayEggIntervalMultiplier=1
+PoopIntervalMultiplier=1
+CropDecaySpeedMultiplier=1
+MatingIntervalMultiplier=1
+EggHatchSpeedMultiplier=1
+BabyMatureSpeedMultiplier=1
+BabyFoodConsumptionSpeedMultiplier=1
+DinoTurretDamageMultiplier=1
+DinoHarvestingDamageMultiplier=3.20000005
+PlayerHarvestingDamageMultiplier=1
+CustomRecipeEffectivenessMultiplier=1
+CustomRecipeSkillMultiplier=1
+AutoPvEStartTimeSeconds=0
+AutoPvEStopTimeSeconds=0
+KillXPMultiplier=1
+HarvestXPMultiplier=1
+CraftXPMultiplier=1
+GenericXPMultiplier=1
+SpecialXPMultiplier=1
+FuelConsumptionIntervalMultiplier=1
+PhotoModeRangeLimit=3000
+bDisablePhotoMode=False
+bIncreasePvPRespawnInterval=True
+bAutoPvETimer=False
+bAutoPvEUseSystemTime=False
+bDisableFriendlyFire=False
+bFlyerPlatformAllowUnalignedDinoBasing=False
+bDisableLootCrates=False
+bAllowCustomRecipes=True
+bPassiveDefensesDamageRiderlessDinos=False
+bPvEAllowTribeWar=True
+bPvEAllowTribeWarCancel=False
+MaxDifficulty=False
+bUseSingleplayerSettings=True
+bUseCorpseLocator=True
+bShowCreativeMode=False
+bHardLimitTurretsInRange=True
+bDisableStructurePlacementCollision=False
+bAllowPlatformSaddleMultiFloors=False
+bAllowUnlimitedRespecs=False
+bDisableDinoRiding=False
+bDisableDinoTaming=False
+OverrideMaxExperiencePointsPlayer=0
+OverrideMaxExperiencePointsDino=0
+MaxNumberOfPlayersInTribe=0
+ExplorerNoteXPMultiplier=1
+BossKillXPMultiplier=1
+AlphaKillXPMultiplier=1
+WildKillXPMultiplier=1
+CaveKillXPMultiplier=1
+TamedKillXPMultiplier=1
+UnclaimedKillXPMultiplier=1
+SupplyCrateLootQualityMultiplier=1
+FishingLootQualityMultiplier=1
+CraftingSkillBonusMultiplier=1
+bAllowSpeedLeveling=False
+bAllowFlyerSpeedLeveling=False
+
+[ShooterGameMode_TEMPOverrides]
+bUseCorpseLocator=True
+"@ | Set-Content -Path $GameIniPath
+    } else {
+        # File has content, do nothing or provide a message
+        Write-Host "Game.ini already has content. Not overwriting."
     }
 
     Invoke-Item $GameIniPath
@@ -541,7 +686,6 @@ function Get-PlayerCount {
         [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
 }
-
 
 # Function to download and extract mcrcon.exe
 function Get-Mcrcon {
