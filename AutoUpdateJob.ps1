@@ -37,7 +37,7 @@ $runningProcess = Get-Process -Name $processName -ErrorAction SilentlyContinue
 if ($runningProcess) {
     Stop-Process -Name $processName -Force
 } else {
-    Write-Host "Der Prozess '$processName' läuft nicht."
+    Write-Host "The Prozess '$processName' not running."
 }
 
 Start-Process -FilePath "$($ConfigData.SteamCMD)\SteamCMD\steamcmd.exe" -ArgumentList "+force_install_dir $($ConfigData.ARKServerPath) +login anonymous +app_update $($ConfigData.AppID) +quit" -Wait
