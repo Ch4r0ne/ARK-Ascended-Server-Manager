@@ -28,7 +28,7 @@ function Send-RconCommand {
 $stopServerCommand = "doexit"
 $mcrconOutput = Send-RconCommand -ServerIP $ConfigData.ServerIP -RCONPort $ConfigData.RCONPort -AdminPassword $ConfigData.AdminPassword -Command $stopServerCommand
 
-Start-Sleep -Seconds 300
+Start-Sleep -Seconds 60
 
 $processName = "ArkAscendedServer"
 $runningProcess = Get-Process -Name $processName -ErrorAction SilentlyContinue
