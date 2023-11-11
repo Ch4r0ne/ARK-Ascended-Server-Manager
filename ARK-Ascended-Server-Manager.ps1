@@ -491,7 +491,7 @@ $buttonAutoUpdateJob.Add_Click({
     # Create Auto-Update job
     Create-AutoUpdateJob -TaskName $taskName -ScriptPath $scriptPath -ConfigFolderPath $ConfigFolderPath
 
-    [Windows.Forms.MessageBox]::Show("Auto-Update job created successfully.", "Success", [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)
+    Start-Process "taskschd.msc"
 })
 
 
