@@ -15,8 +15,9 @@ $DefaultConfig = @{
     Password = ""
     Mods= ""
     RCONPort = "27020"
-    RCONEnabled = "False"
+    RCONEnabled = "True"
     ForceRespawnDinos = $false  # Set the default value as a boolean"
+    ServerIP = "localhost"
 }
 
 # Create configuration folder and file if not exists
@@ -44,6 +45,7 @@ function Save-Config {
         RCONPort = $RCONPortTextBox.Text
         RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
         ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+        ServerIP = $ServerIPTextBox.Text
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -81,11 +83,32 @@ $Mods = $ConfigData.Mods
 $RCONPort = $ConfigData.RCONPort
 $RCONEnabled = $ConfigData.RCONEnabled
 $ForceRespawnDinos = $ConfigData.ForceRespawnDinos
+$ServerIP = $ConfigData.ServerIP
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
 $Form.Text = "ARK-Ascended-Server-Manager"
-$Form.Size = New-Object Drawing.Size(600, 600)
+$Form.Size = New-Object Drawing.Size(1000, 600)
+
+# Label to display player count
+$PlayerCountLabel = New-Object Windows.Forms.Label
+$PlayerCountLabel.Text = "Players Online: 0/$MaxPlayers"
+#$PlayerCountLabel.AutoSize = $true
+$PlayerCountLabel.Location = New-Object Drawing.Point(10, 10)
+$Form.Controls.Add($PlayerCountLabel)
+
+# Button to trigger player count update
+$UpdatePlayerCountButton = New-Object Windows.Forms.Button
+$UpdatePlayerCountButton.Location = New-Object Drawing.Point(120, 10)
+$UpdatePlayerCountButton.Size = New-Object Drawing.Size(80, 30)
+$UpdatePlayerCountButton.Text = "Update Player Count"
+$UpdatePlayerCountButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Standard
+$UpdatePlayerCountButton.Add_Click({ 
+    Get-PlayerCount
+    Get-Mcrcon
+})
+$Form.Controls.Add($UpdatePlayerCountButton)
+
 
 # SteamCMD path
 $SteamCMDLabel = New-Object Windows.Forms.Label
@@ -141,6 +164,17 @@ $MaxPlayersTextBox = New-Object Windows.Forms.TextBox
 $MaxPlayersTextBox.Location = New-Object Drawing.Point(200, 170)
 $MaxPlayersTextBox.Size = New-Object Drawing.Size(50, 20)
 $Form.Controls.Add($MaxPlayersTextBox)
+
+# Server IP
+$ServerIPLabel = New-Object Windows.Forms.Label
+$ServerIPLabel.Text = "Server IP:"
+$ServerIPLabel.Location = New-Object Drawing.Point(50, 200)
+$Form.Controls.Add($ServerIPLabel)
+
+$ServerIPTextBox = New-Object Windows.Forms.TextBox
+$ServerIPTextBox.Location = New-Object Drawing.Point(200, 200)
+$ServerIPTextBox.Size = New-Object Drawing.Size(150, 20)
+$Form.Controls.Add($ServerIPTextBox)
 
 # Port
 $PortLabel = New-Object Windows.Forms.Label
@@ -244,6 +278,32 @@ $ForceRespawnDinosCheckBox.Location = New-Object Drawing.Point(200, 440)
 $ForceRespawnDinosCheckBox.Size = New-Object Drawing.Size(20, 20)
 $Form.Controls.Add($ForceRespawnDinosCheckBox)
 
+# Command Input Field
+$CommandLabel = New-Object Windows.Forms.Label
+$CommandLabel.Text = "Enter Command:"
+$CommandLabel.AutoSize = $true
+$CommandLabel.Location = New-Object Drawing.Point(550, 50)
+$Form.Controls.Add($CommandLabel)
+
+$CommandTextBox = New-Object Windows.Forms.TextBox
+$CommandTextBox.Location = New-Object Drawing.Point(650, 50)
+$CommandTextBox.Size = New-Object Drawing.Size(220, 20)
+$Form.Controls.Add($CommandTextBox)
+
+# Console Output Field
+$ConsoleOutputLabel = New-Object Windows.Forms.Label
+$ConsoleOutputLabel.Text = "Console Output:"
+$ConsoleOutputLabel.Location = New-Object Drawing.Point(50, 110)
+$Form.Controls.Add($ConsoleOutputLabel)
+
+$ConsoleOutputTextBox = New-Object Windows.Forms.TextBox
+$ConsoleOutputTextBox.Location = New-Object Drawing.Point(550, 80)
+$ConsoleOutputTextBox.Size = New-Object Drawing.Size(400, 100)
+$ConsoleOutputTextBox.Multiline = $true
+$ConsoleOutputTextBox.ScrollBars = "Vertical"
+$ConsoleOutputTextBox.ReadOnly = $true
+$Form.Controls.Add($ConsoleOutputTextBox)
+
 # Install Button
 $InstallButton = New-Object Windows.Forms.Button
 $InstallButton.Location = New-Object Drawing.Point(50, 500)
@@ -277,7 +337,7 @@ $ServerUpdateButton.Add_Click({
 $SaveButton = New-Object Windows.Forms.Button
 $SaveButton.Location = New-Object Drawing.Point(250, 500)
 $SaveButton.Size = New-Object Drawing.Size(80, 30)
-$SaveButton.Text = "Save"
+$SaveButton.Text = "Save Config"
 $Form.Controls.Add($SaveButton)
 $SaveButton.Add_Click({
     try {
@@ -293,7 +353,7 @@ $SaveButton.Add_Click({
 $StartServerButton = New-Object Windows.Forms.Button
 $StartServerButton.Location = New-Object Drawing.Point(350, 500)
 $StartServerButton.Size = New-Object Drawing.Size(80, 30)
-$StartServerButton.Text = "Start"
+$StartServerButton.Text = "Start Server"
 $Form.Controls.Add($StartServerButton)
 $StartServerButton.Add_Click({
     try {
@@ -309,7 +369,7 @@ $StartServerButton.Add_Click({
 
 # Backup Button
 $BackupButton = New-Object Windows.Forms.Button
-$BackupButton.Location = New-Object Drawing.Point(450, 500)
+$BackupButton.Location = New-Object Drawing.Point(875, 500)
 $BackupButton.Size = New-Object Drawing.Size(80, 30)
 $BackupButton.Text = "Backup"
 $Form.Controls.Add($BackupButton)
@@ -318,7 +378,6 @@ $BackupButton.Add_Click({
     if ($downloadConfirmation -eq [System.Windows.Forms.DialogResult]::OK) {
         try {
             Download-BackupTool
-            Start-Backup
         } catch {
             [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         }
@@ -326,6 +385,348 @@ $BackupButton.Add_Click({
         [System.Windows.Forms.MessageBox]::Show("Backup process canceled.", "Canceled", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
     }
 })
+
+# Create Auto Update Job button
+$buttonAutoUpdateJob = New-Object Windows.Forms.Button
+$buttonAutoUpdateJob.Location = New-Object Drawing.Point(700, 500)
+$buttonAutoUpdateJob.Size = New-Object Drawing.Size(150, 30)
+$buttonAutoUpdateJob.Text = "Create Auto-Update Job"
+$Form.Controls.Add($buttonAutoUpdateJob)
+$buttonAutoUpdateJob.Add_Click({
+    function Create-AutoUpdateJob {
+        param (
+            [string]$TaskName,
+            [string]$ScriptPath,
+            [string]$ConfigFolderPath
+        )
+
+        # Create a form for better user interaction
+        $form = New-Object Windows.Forms.Form
+        $form.Text = "Create Auto-Update Job"
+        $form.Size = New-Object Drawing.Size(400, 200)
+        $form.StartPosition = "CenterScreen"
+
+        $label = New-Object Windows.Forms.Label
+        $label.Location = New-Object Drawing.Point(10, 20)
+        $label.Size = New-Object Drawing.Size(380, 20)
+        $label.Text = "Please enter the details for the Auto-Update job:"
+
+        $labelTime = New-Object Windows.Forms.Label
+        $labelTime.Location = New-Object Drawing.Point(10, 50)
+        $labelTime.Size = New-Object Drawing.Size(100, 20)
+        $labelTime.Text = "Scheduled Time:"
+
+        $dateTimePicker = New-Object Windows.Forms.DateTimePicker
+        $dateTimePicker.Location = New-Object Drawing.Point(120, 50)
+        $dateTimePicker.Format = [Windows.Forms.DateTimePickerFormat]::Custom
+        $dateTimePicker.CustomFormat = "HH:mm"
+
+        $labelTaskName = New-Object Windows.Forms.Label
+        $labelTaskName.Location = New-Object Drawing.Point(10, 80)
+        $labelTaskName.Size = New-Object Drawing.Size(100, 20)
+        $labelTaskName.Text = "Task Name:"
+
+        $textBoxTaskName = New-Object Windows.Forms.TextBox
+        $textBoxTaskName.Location = New-Object Drawing.Point(120, 80)
+        $textBoxTaskName.Size = New-Object Drawing.Size(200, 20)
+
+        $buttonOK = New-Object Windows.Forms.Button
+        $buttonOK.Location = New-Object Drawing.Point(120, 120)
+        $buttonOK.Size = New-Object Drawing.Size(75, 23)
+        $buttonOK.Text = "OK"
+        $buttonOK.DialogResult = [Windows.Forms.DialogResult]::OK
+
+        $buttonCancel = New-Object Windows.Forms.Button
+        $buttonCancel.Location = New-Object Drawing.Point(220, 120)
+        $buttonCancel.Size = New-Object Drawing.Size(75, 23)
+        $buttonCancel.Text = "Cancel"
+        $buttonCancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
+
+        # Add controls to the form
+        $form.Controls.Add($label)
+        $form.Controls.Add($labelTime)
+        $form.Controls.Add($dateTimePicker)
+        $form.Controls.Add($labelTaskName)
+        $form.Controls.Add($textBoxTaskName)
+        $form.Controls.Add($buttonOK)
+        $form.Controls.Add($buttonCancel)
+
+        # Show the form
+        $result = $form.ShowDialog()
+
+        if ($result -eq [Windows.Forms.DialogResult]::OK) {
+            $selectedTime = $dateTimePicker.Value.ToString("HH:mm")
+            $selectedTaskName = $textBoxTaskName.Text
+
+            # Download AutoUpdateJob.ps1 from GitHub if it does not exist
+            $autoUpdateScriptPath = Join-Path $ScriptPath "AutoUpdateJob.ps1"
+            if (-not (Test-Path $autoUpdateScriptPath)) {
+                $downloadUrl = "https://raw.githubusercontent.com/Ch4r0ne/ARK-Ascended-Server-Manager/main/AutoUpdateJob.ps1"
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $autoUpdateScriptPath
+            }
+
+            # Create scheduled task
+            $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "$autoUpdateScriptPath"
+            $taskTrigger = New-ScheduledTaskTrigger -Daily -At $selectedTime
+
+            Register-ScheduledTask -Action $taskAction -Trigger $taskTrigger -TaskName "$TaskName - $selectedTaskName" -Force
+        }
+    }
+
+    # Define script and task names
+    $scriptPath = $ConfigFolderPath
+    $taskName = "AutoUpdateJob"
+
+    # Check if task with the same name already exists
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+    if ($existingTask -ne $null) {
+        $result = [Windows.Forms.MessageBox]::Show("A task with the name $taskName already exists. Do you want to overwrite it?", "Warning", [Windows.Forms.MessageBoxButtons]::YesNo, [Windows.Forms.MessageBoxIcon]::Warning)
+
+        if ($result -eq [Windows.Forms.DialogResult]::No) {
+            return
+        }
+    }
+
+    # Create Auto-Update job
+    Create-AutoUpdateJob -TaskName $taskName -ScriptPath $scriptPath -ConfigFolderPath $ConfigFolderPath
+
+    Start-Process "taskschd.msc"
+})
+
+
+
+# Send button for the RCON command
+$buttonSend = New-Object Windows.Forms.Button
+$buttonSend.Text = "Send"
+$buttonSend.Location = New-Object Drawing.Point(875, 50)
+$Form.Controls.Add($buttonSend)
+$buttonSend.Add_Click({
+    Get-Mcrcon
+    try {
+        # Validate user inputs
+        if (-not $ServerIP -or -not $AdminPassword) {
+            throw "Server IP and Admin Password are required."
+        }
+
+        $rconCommand = $CommandTextBox.Text
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $rconCommand
+
+        # Write the RCON input into the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Command: $rconCommand`r`n")
+
+        # Write the RCON output to the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`r`n")`r`n")
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
+# Stop Server button
+$buttonStopServer = New-Object Windows.Forms.Button
+$buttonStopServer.Location = New-Object Drawing.Point(450, 500)
+$buttonStopServer.Size = New-Object Drawing.Size(80, 30)
+$buttonStopServer.Text = "Stop Server"
+$Form.Controls.Add($buttonStopServer)
+$buttonStopServer.Add_Click({
+    Get-Mcrcon
+    try {
+        # Validate user inputs
+        if (-not $ServerIP -or -not $AdminPassword) {
+            throw "Server IP and Admin Password are required."
+        }
+
+        # Stop server command
+        $stopServerCommand = "doexit"
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $stopServerCommand
+
+        # Write the RCON input into the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Command: $stopServerCommand`r`n")
+
+        # Write the RCON output to the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`r`n")`r`n")
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
+# Open GameUserSettings.ini button
+$buttonOpenGameUserSettings = New-Object Windows.Forms.Button
+$buttonOpenGameUserSettings.Location = New-Object Drawing.Point(550, 200)
+$buttonOpenGameUserSettings.Size = New-Object Drawing.Size(200, 30)
+$buttonOpenGameUserSettings.Text = "Open GameUserSettings.ini"
+$buttonOpenGameUserSettings.FlatStyle = [System.Windows.Forms.FlatStyle]::Popup  # Modified button style
+$buttonOpenGameUserSettings.Add_Click({
+    $GameUserSettingsPath = Join-Path $ARKServerPath "ShooterGame\Saved\Config\WindowsServer\GameUserSettings.ini"
+
+    if (-not (Test-Path -Path $GameUserSettingsPath)) {
+        New-Item -ItemType File -Path $GameUserSettingsPath
+    }
+
+    Invoke-Item $GameUserSettingsPath
+})
+$Form.Controls.Add($buttonOpenGameUserSettings)
+
+# Open Game.ini button
+$buttonOpenGameIni = New-Object Windows.Forms.Button
+$buttonOpenGameIni.Location = New-Object Drawing.Point(760, 200)
+$buttonOpenGameIni.Size = New-Object Drawing.Size(200, 30)
+$buttonOpenGameIni.Text = "Open Game.ini"
+$buttonOpenGameIni.FlatStyle = [System.Windows.Forms.FlatStyle]::Popup  # Modified button style
+$buttonOpenGameIni.Add_Click({
+    $GameIniPath = Join-Path $ARKServerPath "ShooterGame\Saved\Config\WindowsServer\Game.ini"
+
+    # Check if Game.ini exists
+    if (-not (Test-Path -Path $GameIniPath)) {
+        # Create an empty Game.ini
+        New-Item -ItemType File -Path $GameIniPath | Out-Null
+    }
+
+    # Read the content of Game.ini
+    $gameIniContent = Get-Content $GameIniPath -Raw -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrEmpty($gameIniContent)) {
+        # Write default content to Game.ini if it's empty
+        @"
+[/Script/ShooterGame.ShooterGameMode]
+BabyImprintingStatScaleMultiplier=1
+BabyCuddleIntervalMultiplier=1
+BabyCuddleGracePeriodMultiplier=1
+BabyCuddleLoseImprintQualitySpeedMultiplier=1
+PerLevelStatsMultiplier_DinoTamed[0]=0.200000003
+PerLevelStatsMultiplier_DinoTamed[1]=1
+PerLevelStatsMultiplier_DinoTamed[2]=1
+PerLevelStatsMultiplier_DinoTamed[3]=1
+PerLevelStatsMultiplier_DinoTamed[4]=1
+PerLevelStatsMultiplier_DinoTamed[5]=1
+PerLevelStatsMultiplier_DinoTamed[6]=1
+PerLevelStatsMultiplier_DinoTamed[7]=1
+PerLevelStatsMultiplier_DinoTamed[8]=0.173999995
+PerLevelStatsMultiplier_DinoTamed[9]=1
+PerLevelStatsMultiplier_DinoTamed[10]=1
+PerLevelStatsMultiplier_DinoTamed_Add[0]=0.140000001
+PerLevelStatsMultiplier_DinoTamed_Add[1]=1
+PerLevelStatsMultiplier_DinoTamed_Add[2]=1
+PerLevelStatsMultiplier_DinoTamed_Add[3]=1
+PerLevelStatsMultiplier_DinoTamed_Add[4]=1
+PerLevelStatsMultiplier_DinoTamed_Add[5]=1
+PerLevelStatsMultiplier_DinoTamed_Add[6]=1
+PerLevelStatsMultiplier_DinoTamed_Add[7]=1
+PerLevelStatsMultiplier_DinoTamed_Add[8]=0.140000001
+PerLevelStatsMultiplier_DinoTamed_Add[9]=1
+PerLevelStatsMultiplier_DinoTamed_Add[10]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[0]=0.439999998
+PerLevelStatsMultiplier_DinoTamed_Affinity[1]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[2]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[3]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[4]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[5]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[6]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[7]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[8]=0.439999998
+PerLevelStatsMultiplier_DinoTamed_Affinity[9]=1
+PerLevelStatsMultiplier_DinoTamed_Affinity[10]=1
+PerLevelStatsMultiplier_DinoWild[0]=1
+PerLevelStatsMultiplier_DinoWild[1]=1
+PerLevelStatsMultiplier_DinoWild[2]=1
+PerLevelStatsMultiplier_DinoWild[3]=1
+PerLevelStatsMultiplier_DinoWild[4]=1
+PerLevelStatsMultiplier_DinoWild[5]=1
+PerLevelStatsMultiplier_DinoWild[6]=1
+PerLevelStatsMultiplier_DinoWild[7]=1
+PerLevelStatsMultiplier_DinoWild[8]=1
+PerLevelStatsMultiplier_DinoWild[9]=1
+PerLevelStatsMultiplier_DinoWild[10]=1
+PerLevelStatsMultiplier_Player[0]=1
+PerLevelStatsMultiplier_Player[1]=1
+PerLevelStatsMultiplier_Player[2]=1
+PerLevelStatsMultiplier_Player[3]=1
+PerLevelStatsMultiplier_Player[4]=1
+PerLevelStatsMultiplier_Player[5]=1
+PerLevelStatsMultiplier_Player[6]=1
+PerLevelStatsMultiplier_Player[7]=1
+PerLevelStatsMultiplier_Player[8]=1
+PerLevelStatsMultiplier_Player[9]=1
+PerLevelStatsMultiplier_Player[10]=1
+GlobalSpoilingTimeMultiplier=0
+GlobalItemDecompositionTimeMultiplier=0
+GlobalCorpseDecompositionTimeMultiplier=6
+PvPZoneStructureDamageMultiplier=6
+StructureDamageRepairCooldown=180
+IncreasePvPRespawnIntervalCheckPeriod=300
+IncreasePvPRespawnIntervalMultiplier=2
+IncreasePvPRespawnIntervalBaseAmount=59.9999809
+ResourceNoReplenishRadiusPlayers=1
+ResourceNoReplenishRadiusStructures=1
+CropGrowthSpeedMultiplier=1
+LayEggIntervalMultiplier=1
+PoopIntervalMultiplier=1
+CropDecaySpeedMultiplier=1
+MatingIntervalMultiplier=1
+EggHatchSpeedMultiplier=1
+BabyMatureSpeedMultiplier=1
+BabyFoodConsumptionSpeedMultiplier=1
+DinoTurretDamageMultiplier=1
+DinoHarvestingDamageMultiplier=3.20000005
+PlayerHarvestingDamageMultiplier=1
+CustomRecipeEffectivenessMultiplier=1
+CustomRecipeSkillMultiplier=1
+AutoPvEStartTimeSeconds=0
+AutoPvEStopTimeSeconds=0
+KillXPMultiplier=1
+HarvestXPMultiplier=1
+CraftXPMultiplier=1
+GenericXPMultiplier=1
+SpecialXPMultiplier=1
+FuelConsumptionIntervalMultiplier=1
+PhotoModeRangeLimit=3000
+bDisablePhotoMode=False
+bIncreasePvPRespawnInterval=True
+bAutoPvETimer=False
+bAutoPvEUseSystemTime=False
+bDisableFriendlyFire=False
+bFlyerPlatformAllowUnalignedDinoBasing=False
+bDisableLootCrates=False
+bAllowCustomRecipes=True
+bPassiveDefensesDamageRiderlessDinos=False
+bPvEAllowTribeWar=True
+bPvEAllowTribeWarCancel=False
+MaxDifficulty=False
+bUseSingleplayerSettings=True
+bUseCorpseLocator=True
+bShowCreativeMode=False
+bHardLimitTurretsInRange=True
+bDisableStructurePlacementCollision=False
+bAllowPlatformSaddleMultiFloors=False
+bAllowUnlimitedRespecs=False
+bDisableDinoRiding=False
+bDisableDinoTaming=False
+OverrideMaxExperiencePointsPlayer=0
+OverrideMaxExperiencePointsDino=0
+MaxNumberOfPlayersInTribe=0
+ExplorerNoteXPMultiplier=1
+BossKillXPMultiplier=1
+AlphaKillXPMultiplier=1
+WildKillXPMultiplier=1
+CaveKillXPMultiplier=1
+TamedKillXPMultiplier=1
+UnclaimedKillXPMultiplier=1
+SupplyCrateLootQualityMultiplier=1
+FishingLootQualityMultiplier=1
+CraftingSkillBonusMultiplier=1
+bAllowSpeedLeveling=False
+bAllowFlyerSpeedLeveling=False
+
+[ShooterGameMode_TEMPOverrides]
+bUseCorpseLocator=True
+"@ | Set-Content -Path $GameIniPath
+    } else {
+        # File has content, do nothing or provide a message
+        Write-Host "Game.ini already has content. Not overwriting."
+    }
+
+    Invoke-Item $GameIniPath
+})
+$Form.Controls.Add($buttonOpenGameIni)
 
 # Function to update the GUI elements with the loaded configuration data
 function Update-GUIFromConfig {
@@ -343,6 +744,7 @@ function Update-GUIFromConfig {
     $RCONPortTextBox.Text = $RCONPort
     $RCONEnabledComboBox.SelectedItem = $RCONEnabled
     $ForceRespawnDinosCheckBox.Checked = [System.Boolean]::Parse($ConfigData.ForceRespawnDinos)  # Set checkbox value based on the saved boolean value
+    $ServerIPTextBox.Text =  $ServerIP
 
 }
 
@@ -368,26 +770,111 @@ if (Test-Path -Path $ScriptConfig) {
     Update-GUIFromConfig
 }
 
-function Download-BackupTool {
-    $BackupToolURL = ""
-    $BackupToolPath = ""
-    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.2/BackupJobSchedulerGUI.msi"
-    $BackupToolPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
-    if (-not (Test-Path -Path $BackupToolPath)) {
-        Write-Output "Downloading Backup Tool..."
-        Invoke-WebRequest -Uri $BackupToolURL -OutFile $BackupToolPath
-        Write-Output "Backup Tool downloaded successfully."
+# Function to get player count using RCON
+function Get-PlayerCount {
+    try {
+        # Validate user inputs
+        if (-not $ServerIP -or -not $AdminPassword) {
+            throw "Server IP and Admin Password are required."
+        }
+
+        # RCON command to get player list
+        $getPlayerCountCommand = "listplayers"
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $getPlayerCountCommand
+
+        # Check if the output contains "No Players Connected"
+        if ($mcrconOutput -match "No Players Connected") {
+            $playerCount = 0
+        } else {
+            # Count the number of lines in the output, each line represents a player
+            $playerCount = $mcrconOutput.Count
+        }
+
+        # Update the PlayerCountLabel
+        $PlayerCountLabel.Text = "Players Online: $playerCount/$MaxPlayers"
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
 }
 
-function Start-Backup {
-    $MSIPath = Join-Path $ConfigFolderPath "BackupJobSchedulerGUI.msi"
+# Function to download and extract mcrcon.exe
+function Get-Mcrcon {
+    $mcrconPath = Join-Path $env:TEMP "mcrcon.exe"
+    if (-not (Test-Path -Path $mcrconPath)) {
+        $downloadURL = "https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-windows-x86-64.zip"
+        $zipPath = Join-Path $env:TEMP "mcrcon.zip"
+        Invoke-RestMethod -Uri $downloadURL -OutFile $zipPath
+        Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
+        Remove-Item -Path $zipPath -Force
+    }
+    return $mcrconPath
+}
+
+# Function to send RCON command
+function Send-RconCommand {
+    param (
+        [string]$ServerIP,
+        [int]$RCONPort,
+        [string]$AdminPassword,
+        [string]$Command
+    )
 
     try {
-        Start-Process msiexec.exe -ArgumentList "/i `"$MSIPath`"" -Wait -PassThru
-        Write-Output "MSI installation completed successfully."
+        $mcrconPath = Get-Mcrcon
+
+        # Connect to the server via RCON and send the command
+        $mcrconOutput = Invoke-Expression "$mcrconPath -H $ServerIP -P $RCONPort -p '$AdminPassword' '$Command'"
+
+        # Replace all newline characters with `n` in the output
+        $mcrconOutput = $mcrconOutput -replace "`r`n|`r|`n|`n", "`n"
+
+        return "$mcrconOutput`n"
     } catch {
-        Write-Output "Error during MSI installation: $_"
+        throw "An error occurred: $_"
+    }
+}
+
+# Function Download Backup Tool
+function Download-BackupTool {
+    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.2/BackupJobSchedulerGUI.msi"
+    
+    # Extrahiere den Dateinamen aus der URL
+    $fileName = [System.IO.Path]::GetFileName($BackupToolURL)
+    
+    # Ask user for download location
+    $downloadPath = Get-SaveFileLocation -Title "Select download location" -Filter "MSI Files (*.msi)|*.msi" -FileName $fileName
+
+    # Check if the user selected a location
+    if ($downloadPath -ne "") {
+        Write-Output "Downloading Backup Tool to $downloadPath..."
+        Invoke-WebRequest -Uri $BackupToolURL -OutFile $downloadPath
+        Write-Output "Backup Tool downloaded successfully to $downloadPath."
+    } else {
+        Write-Output "Download canceled by user."
+    }
+}
+
+# Function to show Save File Dialog
+function Get-SaveFileLocation {
+    param (
+        [string]$Title,
+        [string]$Filter,
+        [string]$FileName
+    )
+
+    [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null
+
+    $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+    $saveFileDialog.Title = $Title
+    $saveFileDialog.Filter = $Filter
+    $saveFileDialog.FileName = $FileName
+
+    $result = $saveFileDialog.ShowDialog()
+
+    if ($result -eq "OK" -or $result -eq "Yes") {
+        return $saveFileDialog.FileName
+    } else {
+        return ""
     }
 }
 
@@ -467,6 +954,7 @@ function Update-Config {
     $ConfigData.RCONPort = $RCONPortTextBox.Text
     $ConfigData.RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
     $ConfigData.ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+    $ConfigData.ServerIP = $ServerIPTextBox.Text  # Save Server IP
 
 
     # Update global variables with new values
@@ -484,6 +972,7 @@ function Update-Config {
     $script:RCONPort = $ConfigData.RCONPort
     $script:RCONEnabled = $ConfigData.RCONEnabled
     $script:ForceRespawnDinos = $ConfigData.ForceRespawnDinos  # Assign boolean value directly
+    $script:ServerIP = $ConfigData.ServerIP  # Assign Server IP
 
     Save-Config
 }
@@ -493,6 +982,9 @@ function Install-ARKServer {
     try {
         # Update configuration settings
         Update-Config
+        # Downloade Mcrcon
+        Get-Mcrcon
+
 
         # Configuration settings
         $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
