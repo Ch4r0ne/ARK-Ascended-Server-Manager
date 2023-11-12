@@ -910,7 +910,7 @@ function Start-ARKServer {
     $MaxPlayers = $ConfigData.MaxPlayers.Trim()
 
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?MaxPlayers="{6}"?RCONEnabled={7}?RCONPort={8}?ServerAdminPassword="{5}" -{9} -automanagedmods -mods={10}, -{11}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $BattleEye, $Mods, $ForceRespawnDinosValue)
+    $ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?RCONEnabled={7}?RCONPort={8}?ServerAdminPassword="{5}" -{9} -automanagedmods -mods={10}, -WinLiveMaxPlayers={6}, -{11}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $BattleEye, $Mods, $ForceRespawnDinosValue)
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
