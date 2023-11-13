@@ -536,7 +536,17 @@ $buttonStopServer.Add_Click({
             throw "Server IP and Admin Password are required."
         }
 
-        # Stop server command
+        # First command: saveworld
+        $saveWorldCommand = "saveworld"
+        $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $saveWorldCommand
+
+        # Write the RCON input into the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Command: $saveWorldCommand`r`n")
+
+        # Write the RCON output to the RichTextBox
+        $ConsoleOutputTextBox.AppendText("Response: $($mcrconOutput -join "`r`n")`r`n")
+
+        # Second command: doexit
         $stopServerCommand = "doexit"
         $mcrconOutput = Send-RconCommand -ServerIP $ServerIP -RCONPort $RCONPort -AdminPassword $AdminPassword -Command $stopServerCommand
 
@@ -549,6 +559,7 @@ $buttonStopServer.Add_Click({
         [System.Windows.Forms.MessageBox]::Show("An error occurred: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     }
 })
+
 
 # Open GameUserSettings.ini button
 $buttonOpenGameUserSettings = New-Object Windows.Forms.Button
