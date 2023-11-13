@@ -25,6 +25,11 @@ function Send-RconCommand {
     }
 }
 
+$saveServerCommand = "saveworld"
+$mcrconOutput = Send-RconCommand -ServerIP $ConfigData.ServerIP -RCONPort $ConfigData.RCONPort -AdminPassword $ConfigData.AdminPassword -Command $saveServerCommand
+
+Start-Sleep -Seconds 10
+
 $stopServerCommand = "doexit"
 $mcrconOutput = Send-RconCommand -ServerIP $ConfigData.ServerIP -RCONPort $ConfigData.RCONPort -AdminPassword $ConfigData.AdminPassword -Command $stopServerCommand
 
@@ -49,7 +54,7 @@ foreach ($property in @("ServerMAP", "ServerName", "Port", "QueryPort", "Passwor
 
 $ForceRespawnDinosValue = if ($ConfigData.ForceRespawnDinos) { "ForceRespawnDinos" } else { "" }
 
-$ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?MaxPlayers={5}?RCONEnabled={6}?RCONPort={7}?ServerAdminPassword="{8}" -{9} -automanagedmods -mods={10}, -{11}', $ConfigData.ServerMAP, $ConfigData.ServerName, $ConfigData.Port, $ConfigData.QueryPort, $ConfigData.Password, $ConfigData.MaxPlayers, $ConfigData.RCONEnabled, $ConfigData.RCONPort, $ConfigData.AdminPassword, $ConfigData.BattleEye, $ConfigData.Mods, $ForceRespawnDinosValue)
+$ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?RCONEnabled={6}?RCONPort={7}?ServerAdminPassword="{8}" -{9} -automanagedmods -mods={10}, -WinLiveMaxPlayers={5}, -{11}', $ConfigData.ServerMAP, $ConfigData.ServerName, $ConfigData.Port, $ConfigData.QueryPort, $ConfigData.Password, $ConfigData.MaxPlayers, $ConfigData.RCONEnabled, $ConfigData.RCONPort, $ConfigData.AdminPassword, $ConfigData.BattleEye, $ConfigData.Mods, $ForceRespawnDinosValue)
 
 Write-Output "ServerArguments: $ServerArguments"
 
