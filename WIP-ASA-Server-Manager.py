@@ -46,6 +46,7 @@ script_config = os.path.join(config_folder_path, "testConfig.json")
 if not os.path.exists(config_folder_path):
     os.makedirs(config_folder_path)
 
+
 class MCToolsError(Exception):
     pass
 
@@ -57,7 +58,6 @@ class ProtocolError(MCToolsError):
 class ProtoConnectionClosed(ProtocolError):
 
     def __init__(self, message) -> None:
-        
         self.message = message  # Explanation of the error
 
 
@@ -68,28 +68,24 @@ class RCONError(MCToolsError):
 class RCONAuthenticationError(RCONError):
 
     def __init__(self, message):
-
         self.message = message  # Explanation of the error
 
 
 class RCONMalformedPacketError(RCONError):
 
     def __init__(self, message):
-
         self.message = message  # Explanation of the error
 
 
 class RCONCommunicationError(RCONError):
 
     def __init__(self, message):
-
         self.message = message  # Explanation of the error
 
 
 class RCONLengthError(RCONError):
 
     def __init__(self, message, length):
-
         self.message = message  # Explanation of error
         self.length = length  # Length of data
 
@@ -98,22 +94,18 @@ class BaseEncoder(object):
 
     @staticmethod
     def encode(data):
-
         raise NotImplementedError("Override this method in child class!")
 
     @staticmethod
     def decode(data):
-
         raise NotImplementedError("Override this method in child class!")
 
 
 class RCONEncoder(BaseEncoder):
-
     PAD = b'\x00\x00'
 
     @staticmethod
     def encode(data):
-
         # Encoding the request ID and Request type:
 
         byts = struct.pack("<ii", data[0], data[1])
@@ -130,19 +122,17 @@ class RCONEncoder(BaseEncoder):
 
     @staticmethod
     def decode(byts):
-
         # Getting request ID and request type
 
         reqid, reqtype = struct.unpack("<ii", byts[:8])
 
         # Getting payload
 
-        payload = byts[8:len(byts)-2]
+        payload = byts[8:len(byts) - 2]
 
         # Checking padding:
 
         if not byts[len(byts) - 2:] == RCONEncoder.PAD:
-
             # No padding detected, something is wrong:
 
             raise RCONMalformedPacketError("Missing or malformed padding!")
@@ -156,17 +146,14 @@ class BaseFormatter(object):
 
     @staticmethod
     def format(text):
-
         return text
 
     @staticmethod
     def clean(text):
-
         return text
 
     @staticmethod
     def get_id():
-
         return 20
 
 
@@ -195,7 +182,6 @@ class DefaultFormatter(BaseFormatter):
                 # Replacing format char with ASCII value:
 
                 if form in MAP:
-
                     # Character is a valid format char, format it:
 
                     text = text.replace(CHAR + form, MAP[form], 1)
@@ -234,7 +220,6 @@ class DefaultFormatter(BaseFormatter):
                 # Checking if format char is valid:
 
                 if form in MAP:
-
                     # Yes, format char is valid. Removing all values:
 
                     text = text.replace(CHAR + form, '')
@@ -256,7 +241,6 @@ class DefaultFormatter(BaseFormatter):
 
 
 class FormatterCollection:
-
     QUERY = 'QUERY_PROTOCOL'
     PING = 'PING_PROTOCOL'
 
@@ -273,7 +257,6 @@ class FormatterCollection:
         # Checking formatter parent class:
 
         if not issubclass(form, BaseFormatter):
-
             # Form is not a subclass
 
             raise Exception("Invalid Formatter! Must inherit from BaseFormatter!")
@@ -300,7 +283,7 @@ class FormatterCollection:
 
         if type(thing) not in [str, tuple, list] and thing is not None:
 
-            # Ignore is not a valid type, checking if it is an int so we can convert it:
+            # Ignore is not a valid type, checking if it is an int, so we can convert it:
 
             if type(thing) == int:
 
@@ -353,7 +336,6 @@ class FormatterCollection:
             # Checking if formatter is relevant:
 
             if self._is_relevant(form, command):
-
                 # Formatter is relevant, formatting text:
 
                 text = form[0].format(text)
@@ -371,7 +353,6 @@ class FormatterCollection:
             # Checking if formatter is relevant:
 
             if self._is_relevant(form, command):
-
                 # Formatter is relevant, formatting text:
 
                 text = form[0].clean(text)
@@ -385,15 +366,14 @@ class FormatterCollection:
         # Checking ignore values first:
 
         if (type(form[2]) == str and form[2] == command) or (type(form[2]) in [list, tuple] and command in form[2]):
-
             # Command is a value we are ignoring
 
             return False
 
         # Checking if value is one we are accepting:
 
-        if form[1] == '' or (type(form[1]) == str and form[1] == command) or (type(form[1]) in [list, tuple] and command in form[1]):
-
+        if form[1] == '' or (type(form[1]) == str and form[1] == command) or (
+                type(form[1]) in [list, tuple] and command in form[1]):
             # Command is a command we can handel:
 
             return True
@@ -409,26 +389,21 @@ class BasePacket(object):
 
     @classmethod
     def from_bytes(cls, byts):
-
         raise NotImplementedError("Override this method in child class!")
 
     def __repr__(self):
-
         raise NotImplementedError("Override this method in child class!")
 
     def __str__(self):
-
         raise NotImplementedError("Override this method in child class!")
 
     def __bytes__(self):
-
         raise NotImplementedError("Override this method in child class!")
 
 
 class RCONPacket(BasePacket):
 
     def __init__(self, reqid, reqtype, payload, length=0):
-
         self.reqid = reqid  # Request ID of the RCON packet
         self.reqtype = reqtype  # Request type of the RCON packet
         self.payload = payload  # Payload of the RCON packet
@@ -437,32 +412,29 @@ class RCONPacket(BasePacket):
 
     @classmethod
     def from_bytes(cls, byts):
-
         reqid, reqtype, payload = RCONEncoder.decode(byts)
 
         return cls(reqid, reqtype, payload, length=len(byts))
 
     def __repr__(self):
-
         return "packet.RCONPacket({}, {}, {})".format(self.reqid, self.reqtype, self.payload)
 
     def __str__(self):
-
         return "RCON Packet:\n - Request ID: {}\n - Request Type: {}\n - Payload: {}".format(self.reqid,
                                                                                              self.reqtype,
                                                                                              self.payload)
 
     def __bytes__(self):
-
         return RCONEncoder.encode((self.reqid, self.reqtype, self.payload))
 
 
 class BaseProtocol(object):
 
     def __init__(self) -> None:
-        
+
         # Dummy init, primarily meant to specify the socket parameter:
 
+        self.sock = None
         self.sock: socket.socket
 
         self.timeout = DEFAULT_TIMEOUT  # Defines and sets the timeout value
@@ -497,7 +469,6 @@ class BaseProtocol(object):
             byts = byts + last
 
             if last == b'':
-
                 # We received nothing, lets close this connection:
 
                 self.stop()
@@ -529,7 +500,6 @@ class BaseProtocol(object):
         # Next, determine if we should set the socket timeout:
 
         if self.connected:
-
             # Set the timeout:
 
             self.sock.settimeout(timeout)
@@ -566,7 +536,6 @@ class RCONProtocol(BaseProtocol):
     def start(self):
 
         if self.connected:
-
             # Already started
 
             return
@@ -598,7 +567,6 @@ class RCONProtocol(BaseProtocol):
         # Check if data is too big:
 
         if length_check and len(data) >= 1460:
-
             # Too big, raise an exception!
 
             raise RCONLengthError("Packet type is too big!", len(data))
@@ -629,7 +597,6 @@ class RCONProtocol(BaseProtocol):
 
 
 class BaseClient(object):
-
     # Formatting codes
 
     RAW = 0
@@ -637,48 +604,40 @@ class BaseClient(object):
     REMOVE = 2
 
     def __init__(self) -> None:
-        
         # Dummy init method
 
+        self.formatters = None
+        self.proto = None
         self.proto: BaseProtocol
         self.formatters: BaseFormatter
 
     def gen_reqid(self):
-
         return int(time.time())
 
     def set_timeout(self, timeout):
-
         # Have the protocol object set the timeout:
 
         self.proto.set_timeout(timeout)
 
     def start(self):
-
         raise NotImplementedError("Override this method in child class!")
 
     def stop(self):
-
         raise NotImplementedError("Override this method in child class!")
 
     def is_connected(self):
-
         raise NotImplementedError("Override this method in child class!")
 
     def raw_send(self, *args):
-
         raise NotImplementedError("Override this method in child class!")
 
     def get_formatter(self):
-
         return self.formatters
 
     def __enter__(self):
-
         raise NotImplementedError("Override this method in child class!")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-
         raise NotImplementedError("Override this method in child class!")
 
 
@@ -686,7 +645,9 @@ class RCONClient(BaseClient):
 
     def __init__(self, host, port=25575, reqid=None, format_method=BaseClient.REPLACE, timeout=DEFAULT_TIMEOUT):
 
-        self.proto: RCONProtocol = RCONProtocol(host, port, timeout)  # RCONProtocol, used for communicating with RCON server
+        super().__init__()
+        self.proto: RCONProtocol = RCONProtocol(host, port,
+                                                timeout)  # RCONProtocol, used for communicating with RCON server
         self.formatters: FormatterCollection = FormatterCollection()  # Formatters instance, formats text from server
         self.auth = False  # Value determining if we are authenticated
         self.format = format_method  # Value determining how to format output
@@ -702,7 +663,6 @@ class RCONClient(BaseClient):
         # Start the protocol instance:
 
         if not self.is_connected():
-
             self.proto.start()
 
     def stop(self):
@@ -710,7 +670,6 @@ class RCONClient(BaseClient):
         # Stop the protocol instance
 
         if self.is_connected():
-
             self.auth = False
 
             self.proto.stop()
@@ -723,10 +682,9 @@ class RCONClient(BaseClient):
 
         return self.auth
 
-    def raw_send(self, reqtype: int, payload: str, frag_check: bool=True, length_check: bool=True) -> RCONPacket:
+    def raw_send(self, reqtype: int, payload: str, frag_check: bool = True, length_check: bool = True) -> RCONPacket:
 
         if not self.is_connected():
-
             # Connection not started, user obviously wants to connect, so start it
 
             self.start()
@@ -770,13 +728,11 @@ class RCONClient(BaseClient):
                 temp_pack = self.proto.read()
 
                 if temp_pack.reqtype == self.proto.RESPONSE and temp_pack.payload == 'Unknown request 0':
-
                     # Break, we are done here
 
                     break
 
                 if temp_pack.reqid != self.reqid:
-
                     # Client/server ID's do not match!
 
                     raise RCONMalformedPacketError("Client and server request ID's do not match!")
@@ -794,7 +750,6 @@ class RCONClient(BaseClient):
         # Checking if we are logged in.
 
         if self.is_authenticated():
-
             # Already authenticated, no need to do it again.
 
             return True
@@ -806,7 +761,6 @@ class RCONClient(BaseClient):
         # Checking login packet
 
         if pack.reqid != self.reqid:
-
             # Login failed, request IDs do not match
 
             return False
@@ -821,12 +775,12 @@ class RCONClient(BaseClient):
 
         return self.login(password)
 
-    def command(self, com: str, check_auth: bool=True, format_method: int=None, return_packet: bool=False, frag_check: bool=True, length_check: bool=True) -> Union[RCONPacket, str]:
+    def command(self, com: str, check_auth: bool = True, format_method: int = None, return_packet: bool = False,
+                frag_check: bool = True, length_check: bool = True) -> Union[RCONPacket, str]:
 
         # Checking authentication status:
 
         if check_auth and not self.is_authenticated():
-
             # Not authenticated, let the user know this:
 
             raise RCONAuthenticationError("Not authenticated to the RCON server!")
@@ -840,7 +794,6 @@ class RCONClient(BaseClient):
         pack = self._format(pack, com, format_method=format_method)
 
         if return_packet:
-
             # Return the entire packet:
 
             return pack
@@ -852,7 +805,6 @@ class RCONClient(BaseClient):
     def _format(self, pack, com, format_method=None):
 
         if format_method is None:
-
             # Use the global format method
 
             format_method = self.format
@@ -905,7 +857,7 @@ class ServerManagerApp:
         "ForceRespawnDinos": False,
         "UpdateAndValidate": False
     }
-    
+
     task_thread = None
     app_id = "376030"
 
@@ -1087,10 +1039,9 @@ class ServerManagerApp:
         self.CommandOutputText.place(x=550, y=80)
         self.CommandOutputScrollbar.place(x=1180, y=80, height=325)
 
-
     def command_send(self):
         command = self.CommandTextBox.get()
-        port = self.rcon_port.get()
+        port = int(self.rcon_port.get())
         host = "127.0.0.1"
         passwd = self.admin_password.get()
 
@@ -1099,13 +1050,11 @@ class ServerManagerApp:
 
         if rcon.login(passwd):
             response = rcon.command(command).replace("\033", "").replace("[0m", "").replace("\n", "")
-            print (response)
+            print(response)
             self.CommandOutputText.config(state="normal")
             self.CommandOutputText.insert(tk.END, f"{current_time}: {response}\n")
             self.CommandOutputText.config(state="disabled")
             self.CommandTextBox.delete(0, tk.END)
-
-
 
     # Function to save configuration to file
     def save_config(self):
@@ -1130,7 +1079,6 @@ class ServerManagerApp:
         with open(script_config, 'w') as config_file:
             json.dump(config_data, config_file, indent=4)
 
-
     def install_button_click(self):
         global task_thread
         self.save_config()
@@ -1140,14 +1088,13 @@ class ServerManagerApp:
             task_thread = threading.Thread(target=self.install_ark_server)
             task_thread.start()
 
-
     def install_ark_server(self):
         steamcmd_url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
         vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
         directXUrl = "https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
         steamcmd_path = self.config_data["SteamCMD"]
         ark_server_path = self.config_data["ARKServerPath"]
-        
+
         # URLs for the certificates
         amazon_root_ca_url = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
         certificate_url = "http://crt.r2m02.amazontrust.com/r2m02.cer"
@@ -1215,8 +1162,8 @@ class ServerManagerApp:
                 return True
             except FileNotFoundError:
                 return False
-            
-        def downlaod_file(url, target_path = os.path.join(os.environ['TEMP'])):
+
+        def downlaod_file(url, target_path=os.path.join(os.environ['TEMP'])):
             response = requests.get(url, stream=True)
             with open(target_path, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=1024):
@@ -1244,7 +1191,7 @@ class ServerManagerApp:
             downlaod_file(steamcmd_url)
 
             # Extract SteamCMD to its location
-            with zipfile.ZipFile(os.path.join(os.environ['TEMP'],'steamcmd.zip'), 'r') as zip_ref:
+            with zipfile.ZipFile(os.path.join(os.environ['TEMP'], 'steamcmd.zip'), 'r') as zip_ref:
                 zip_ref.extractall(steamcmd_path)
 
             os.remove('steamcmd.zip')
@@ -1252,14 +1199,15 @@ class ServerManagerApp:
         # Install ARK Server using SteamCMD
         print("Installing ARK Server using SteamCMD...")
         steam_cmd_path = os.path.join(steamcmd_path, "steamcmd.exe")
-        subprocess.call([steam_cmd_path, "+force_install_dir", f"{ark_server_path}", "+login", "anonymous", "+app_update", "2430930", "+quit"], shell=True)
+        subprocess.call(
+            [steam_cmd_path, "+force_install_dir", f"{ark_server_path}", "+login", "anonymous", "+app_update",
+             "2430930", "+quit"], shell=True)
 
         print("ARK Server has been successfully installed.")
-        
+
         # Display success message using Tkinter messagebox
         tk.Tk().withdraw()
         tk.messagebox.showinfo("Installation Complete", "ARK Server has been successfully installed.")
-        
 
     # Server Update Button
     def server_update_click(self):
@@ -1270,22 +1218,21 @@ class ServerManagerApp:
             self.task_thread = threading.Thread(target=self.start_server_update)
             self.task_thread.start()
 
-
     def start_server_update(self):
         # Install ARK Server using SteamCMD
         print("Installing ARK Server using SteamCMD...")
         ark_path = self.config_data["ARKServerPath"]
         steam_cmd_path = os.path.join(self.config_data["SteamCMD"], "steamcmd.exe")
-        #steamcmd_arguments = f"+force_install_dir {ark_path} +login anonymous +app_update {app_id} validate +quit"
-        subprocess.call([steam_cmd_path, "+force_install_dir", f"{ark_path}", "+login", "anonymous", "+app_update", "2430930", "+quit"], shell=True)
+        # steamcmd_arguments = f"+force_install_dir {ark_path} +login anonymous +app_update {app_id} validate +quit"
+        subprocess.call(
+            [steam_cmd_path, "+force_install_dir", f"{ark_path}", "+login", "anonymous", "+app_update", "2430930",
+             "+quit"], shell=True)
 
         print("ARK Server has been successfully installed.")
-
 
     # save Button
     def save_click(self):
         self.save_config()
-
 
     # Launch ARK Button
     def launch_ark_click(self):
@@ -1295,7 +1242,6 @@ class ServerManagerApp:
         else:
             self.task_thread = threading.Thread(target=self.launch_ark)
             self.task_thread.start()
-
 
     def launch_ark(self):
         ARKServerPath = self.config_data["ARKServerPath"]
@@ -1314,34 +1260,38 @@ class ServerManagerApp:
         UAV = self.config_data["UpdateAndValidate"]
         if UAV:
             self.start_server_update()
-        if(ForceRespawnDinos):
-            ForceRespawnDinosValue = "ForceRespawnDinos"
+        if ForceRespawnDinos:
+            force_respawn_dinos_value = "ForceRespawnDinos"
         else:
-            ForceRespawnDinosValue = ""
-        if(BattleEye):
-            BattleEyeValue = "UseBattlEye"
+            force_respawn_dinos_value = ""
+        if BattleEye:
+            battle_eye_value = "UseBattlEye"
         else:
-            BattleEyeValue = "NoBattlEye"
-        if(RCONEnabled):
-            RCONEnabledValue = "True"
+            battle_eye_value = "NoBattlEye"
+        if RCONEnabled:
+            rcon_enabled_value = "True"
         else:
-            RCONEnabledValue = "False"
-        ServerArguments = f'start {ServerMAP}?listen?SessionName="{ServerName}"?Port={Port}?QueryPort={QueryPort}?ServerPassword="{Password}"?MaxPlayers="{MaxPlayers}"?RCONEnabled={RCONEnabledValue}?RCONPort={RCONPort}?ServerAdminPassword="{AdminPassword}" -{BattleEyeValue} -automanagedmods -mods={Mods}, -{ForceRespawnDinosValue}'
-        print(ServerArguments)
+            rcon_enabled_value = "False"
+        server_arguments = f'start {ServerMAP}?listen?SessionName="{ServerName}"?Port={Port}?QueryPort={QueryPort}?ServerPassword="{Password}"?MaxPlayers="{MaxPlayers}"?RCONEnabled={rcon_enabled_value}?RCONPort={RCONPort}?ServerAdminPassword="{AdminPassword}" -{battle_eye_value} -automanagedmods -mods={Mods}, -{force_respawn_dinos_value}'
+        print(server_arguments)
         import subprocess
 
-
         # Construct the server path
-        ServerPath = f'{ARKServerPath}\\ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe'
+        server_path = f'{ARKServerPath}\\ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe'
+        # My start args "C:\asa\ShooterGame\Binaries\Win64\ArkAscendedServer.exe" 
+        # TheIsland_WP?listen?MultiHome=192.168.178.5?Port=7777?QueryPort=27015?MaxPlayers=10
+        # ?ServerAutoForceRespawnWildDinosInterval=172800?AllowCrateSpawnsOnTopOfStructures=True -UseBattlEye 
+        # -automanagedmods -mods=900062,908148,912902,916922,926956,927131,914844 -forcerespawndinos 
+        # -noundermeshchecking -noundermeshkilling -nosteamclient -game -server -log 
+        # -MinimumTimeBetweenInventoryRetrieval=3600 -culture=en
 
-        if ServerArguments.strip():
+        if server_arguments.strip():
             try:
-                subprocess.Popen([ServerPath] + ServerArguments.split(), shell=False)
+                subprocess.Popen([server_path] + server_arguments.split(), shell=False)
             except FileNotFoundError:
                 print("Error: The server executable file was not found.")
         else:
             print("Error: ServerArguments are null or spaces.")
-
 
     # Close Button
     def close_window(self):
@@ -1349,7 +1299,8 @@ class ServerManagerApp:
         self.root.destroy()
         exit()
 
- #test
+
+# test
 if __name__ == "__main__":
     root = tk.Tk()
     app = ServerManagerApp(root)
