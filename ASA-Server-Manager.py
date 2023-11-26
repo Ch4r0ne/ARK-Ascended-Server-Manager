@@ -1027,17 +1027,27 @@ class ServerManagerApp:
             self.task_thread.start()
 
     def updateconfig(self, target_setting, new_value, config="GameUserSettings.ini"):
-        path = os.path.join(self.config_data["ARKServerPath"], 'ShooterGame', 'Saved', 'Config', 'WindowsServer',
-                            config)
+        path = os.path.join(self.config_data.get("ARKServerPath", ""), 'ShooterGame', 'Saved', 'Config', 'WindowsServer', config)
+
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as file:
+                file.write("[ServerSettings]\n")
+
         with open(path, 'r') as file:
             lines = file.readlines()
 
-        for i in range(len(lines)):
-            if target_setting in lines[i]:
-                parts = lines[i].split('=')
+        found = False
+        for i, line in enumerate(lines):
+            if target_setting in line:
+                parts = line.split('=')
                 parts[1] = f'"{new_value}"\n'
                 lines[i] = '='.join(parts)
+                found = True
                 break
+
+        if not found:
+            lines.append(f"{target_setting}=\"{new_value}\"\n")
 
         with open(path, 'w') as file:
             file.writelines(lines)
@@ -1072,8 +1082,8 @@ class ServerManagerApp:
         else:
             rcon_enabled_value = "False"
 
-        self.updateconfig("Password", Password)
-        self.updateconfig("AdminPassword", AdminPassword)
+        self.updateconfig("ServerPassword", Password)
+        self.updateconfig("ServerAdminPassword", AdminPassword)
 
         server_arguments = f'start {ServerMAP}?listen?SessionName="{ServerName}"?Port={Port}?QueryPort={QueryPort}?RCONEnabled={rcon_enabled_value}?RCONPort={RCONPort} -{battle_eye_value} -automanagedmods -mods={Mods}, -WinLiveMaxPlayers={MaxPlayers}, -{force_respawn_dinos_value}'
         print(server_arguments)
