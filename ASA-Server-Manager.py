@@ -1081,12 +1081,7 @@ class ServerManagerApp:
 
         # Construct the server path
         server_path = f'{ARKServerPath}\\ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe'
-        # My start args "C:\asa\ShooterGame\Binaries\Win64\ArkAscendedServer.exe"
-        # TheIsland_WP?listen?MultiHome=192.168.178.5?Port=7777?QueryPort=27015?MaxPlayers=10
-        # ?ServerAutoForceRespawnWildDinosInterval=172800?AllowCrateSpawnsOnTopOfStructures=True -UseBattlEye
-        # -automanagedmods -mods=900062,908148,912902,916922,926956,927131,914844 -forcerespawndinos
-        # -noundermeshchecking -noundermeshkilling -nosteamclient -game -server -log
-        # -MinimumTimeBetweenInventoryRetrieval=3600 -culture=en
+
 
         if server_arguments.strip():
             try:
