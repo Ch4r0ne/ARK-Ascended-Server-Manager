@@ -13,6 +13,9 @@ import time
 import socket
 import struct
 
+# Is required for threading
+task_thread = None
+
 DEFAULT_TIMEOUT = 60
 CHAR = '\u00A7'
 OLD = '\u001b'
@@ -46,49 +49,26 @@ script_config = os.path.join(config_folder_path, "Config.json")
 if not os.path.exists(config_folder_path):
     os.makedirs(config_folder_path)
 
-
-class MCToolsError(Exception):
+class RCONError(Exception):
     pass
-
-
-class ProtocolError(MCToolsError):
-    pass
-
-
-class ProtoConnectionClosed(ProtocolError):
-
-    def __init__(self, message) -> None:
-        self.message = message  # Explanation of the error
-
-
-class RCONError(MCToolsError):
-    pass
-
 
 class RCONAuthenticationError(RCONError):
-
-    def __init__(self, message):
-        self.message = message  # Explanation of the error
-
+    pass
 
 class RCONMalformedPacketError(RCONError):
-
-    def __init__(self, message):
-        self.message = message  # Explanation of the error
-
+    pass
 
 class RCONCommunicationError(RCONError):
-
-    def __init__(self, message):
-        self.message = message  # Explanation of the error
-
+    pass
 
 class RCONLengthError(RCONError):
-
     def __init__(self, message, length):
-        self.message = message  # Explanation of error
-        self.length = length  # Length of data
+        self.message = message
+        self.length = length
 
+class ProtoConnectionClosed(RCONCommunicationError):
+    def __init__(self, message) -> None:
+        self.message = message
 
 class BaseEncoder(object):
 
@@ -606,10 +586,6 @@ class RCONClient(BaseClient):
         # Stopping connection:
         self.stop()
         return False
-
-
-task_thread = None
-
 
 class ServerManagerApp:
     # Define default values
