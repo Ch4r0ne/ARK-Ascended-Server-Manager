@@ -49,24 +49,24 @@ script_config = os.path.join(config_folder_path, "Config.json")
 if not os.path.exists(config_folder_path):
     os.makedirs(config_folder_path)
 
-class RCONError(Exception):
+class RCONException(Exception):
     pass
 
-class RCONAuthenticationError(RCONError):
+class RCONAuthenticationExeption(RCONException):
     pass
 
-class RCONMalformedPacketError(RCONError):
+class RCONMalformedPacketExeption(RCONException):
     pass
 
-class RCONCommunicationError(RCONError):
+class RCONCommunicationExeption(RCONException):
     pass
 
-class RCONLengthError(RCONError):
+class RCONLengthExeption(RCONException):
     def __init__(self, message, length):
         self.message = message
         self.length = length
 
-class ProtoConnectionClosed(RCONCommunicationError):
+class ProtoConnectionClosed(RCONCommunicationExeption):
     def __init__(self, message) -> None:
         self.message = message
 
@@ -103,7 +103,7 @@ class RCONEncoder(BaseEncoder):
         # Checking padding:
         if not byts[len(byts) - 2:] == RCONEncoder.PAD:
             # No padding detected, something is wrong:
-            raise RCONMalformedPacketError("Missing or malformed padding!")
+            raise RCONMalformedPacketExeption("Missing or malformed padding!")
         # Returning values:
         return reqid, reqtype, payload.decode("utf8")
 
@@ -403,7 +403,7 @@ class RCONProtocol(BaseProtocol):
         # Check if data is too big:
         if length_check and len(data) >= 1460:
             # Too big, raise an exception!
-            raise RCONLengthError("Packet type is too big!", len(data))
+            raise RCONLengthExeption("Packet type is too big!", len(data))
         # Sending packet:
         self.write_tcp(data)
 
@@ -509,10 +509,10 @@ class RCONClient(BaseClient):
         # Check if our stuff is valid:
         if pack.reqid != self.reqid and self.is_authenticated() and reqtype != self.proto.LOGIN:
             # Client/server ID's do not match!
-            raise RCONMalformedPacketError("Client and server request ID's do not match!")
+            raise RCONMalformedPacketExeption("Client and server request ID's do not match!")
         elif pack.reqid != self.reqid and reqtype != self.proto.LOGIN:
             # Authentication issue!
-            raise RCONAuthenticationError("Client and server request ID's do not match! We are not authenticated!")
+            raise RCONAuthenticationExeption("Client and server request ID's do not match! We are not authenticated!")
         # Check if the packet is fragmented(And if we even care about fragmentation):
         if frag_check and pack.length >= self.proto.MAX_SIZE:
             # Send a junk packet:
@@ -526,7 +526,7 @@ class RCONClient(BaseClient):
                     break
                 if temp_pack.reqid != self.reqid:
                     # Client/server ID's do not match!
-                    raise RCONMalformedPacketError("Client and server request ID's do not match!")
+                    raise RCONMalformedPacketExeption("Client and server request ID's do not match!")
                 # Add the packet content to the master pack:
                 pack.payload = pack.payload + temp_pack.payload
         # Return our junk:
@@ -555,7 +555,7 @@ class RCONClient(BaseClient):
         # Checking authentication status:
         if check_auth and not self.is_authenticated():
             # Not authenticated, let the user know this:
-            raise RCONAuthenticationError("Not authenticated to the RCON server!")
+            raise RCONAuthenticationExeption("Not authenticated to the RCON server!")
         # Sending command packet:
         pack = self.raw_send(self.proto.COMMAND, com, frag_check=frag_check, length_check=length_check)
         # Get the formatted content:
@@ -586,6 +586,7 @@ class RCONClient(BaseClient):
         # Stopping connection:
         self.stop()
         return False
+
 
 class ServerManagerApp:
     # Define default values
@@ -1003,7 +1004,8 @@ class ServerManagerApp:
             self.task_thread.start()
 
     def updateconfig(self, target_setting, new_value, config="GameUserSettings.ini"):
-        path = os.path.join(self.config_data.get("ARKServerPath", ""), 'ShooterGame', 'Saved', 'Config', 'WindowsServer', config)
+        path = os.path.join(self.config_data.get("ARKServerPath", ""), 'ShooterGame', 'Saved', 'Config',
+                            'WindowsServer', config)
 
         if not os.path.exists(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1067,7 +1069,6 @@ class ServerManagerApp:
 
         # Construct the server path
         server_path = f'{ARKServerPath}\\ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe'
-
 
         if server_arguments.strip():
             try:
