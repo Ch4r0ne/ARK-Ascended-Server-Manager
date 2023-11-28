@@ -49,39 +49,31 @@ script_config = os.path.join(config_folder_path, "Config.json")
 if not os.path.exists(config_folder_path):
     os.makedirs(config_folder_path)
 
+
 class RCONException(Exception):
     pass
 
-class RCONAuthenticationExeption(RCONException):
+
+class RCONAuthenticationException(RCONException):
     pass
 
-class RCONMalformedPacketExeption(RCONException):
+
+class RCONMalformedPacketException(RCONException):
     pass
 
-class RCONCommunicationExeption(RCONException):
-    pass
 
-class RCONLengthExeption(RCONException):
+class ProtoConnectionClosed(RCONException):
+    def __init__(self, message) -> None:
+        self.message = message
+
+
+class RCONLengthException(RCONException):
     def __init__(self, message, length):
         self.message = message
         self.length = length
 
-class ProtoConnectionClosed(RCONCommunicationExeption):
-    def __init__(self, message) -> None:
-        self.message = message
 
-class BaseEncoder(object):
-
-    @staticmethod
-    def encode(data):
-        raise NotImplementedError("Override this method in child class!")
-
-    @staticmethod
-    def decode(data):
-        raise NotImplementedError("Override this method in child class!")
-
-
-class RCONEncoder(BaseEncoder):
+class Encoder(object):
     PAD = b'\x00\x00'
 
     @staticmethod
@@ -89,7 +81,7 @@ class RCONEncoder(BaseEncoder):
         # Encoding the request ID and Request type:
         byts = struct.pack("<ii", data[0], data[1])
         # Encoding payload and padding:
-        byts = byts + data[2].encode("utf8") + RCONEncoder.PAD
+        byts = byts + data[2].encode("utf8") + Encoder.PAD
         # Encoding length:
         byts = struct.pack("<i", len(byts)) + byts
         return byts
@@ -101,9 +93,9 @@ class RCONEncoder(BaseEncoder):
         # Getting payload
         payload = byts[8:len(byts) - 2]
         # Checking padding:
-        if not byts[len(byts) - 2:] == RCONEncoder.PAD:
+        if not byts[len(byts) - 2:] == Encoder.PAD:
             # No padding detected, something is wrong:
-            raise RCONMalformedPacketExeption("Missing or malformed padding!")
+            raise RCONMalformedPacketException("Missing or malformed padding!")
         # Returning values:
         return reqid, reqtype, payload.decode("utf8")
 
@@ -262,23 +254,7 @@ class FormatterCollection:
         return len(self._form)
 
 
-class BasePacket(object):
-
-    @classmethod
-    def from_bytes(cls, byts):
-        raise NotImplementedError("Override this method in child class!")
-
-    def __repr__(self):
-        raise NotImplementedError("Override this method in child class!")
-
-    def __str__(self):
-        raise NotImplementedError("Override this method in child class!")
-
-    def __bytes__(self):
-        raise NotImplementedError("Override this method in child class!")
-
-
-class RCONPacket(BasePacket):
+class Packet(object):
 
     def __init__(self, reqid, reqtype, payload, length=0):
         self.reqid = reqid  # Request ID of the RCON packet
@@ -289,7 +265,7 @@ class RCONPacket(BasePacket):
 
     @classmethod
     def from_bytes(cls, byts):
-        reqid, reqtype, payload = RCONEncoder.decode(byts)
+        reqid, reqtype, payload = Encoder.decode(byts)
 
         return cls(reqid, reqtype, payload, length=len(byts))
 
@@ -302,7 +278,7 @@ class RCONPacket(BasePacket):
                                                                                              self.payload)
 
     def __bytes__(self):
-        return RCONEncoder.encode((self.reqid, self.reqtype, self.payload))
+        return Encoder.encode((self.reqid, self.reqtype, self.payload))
 
 
 class BaseProtocol(object):
@@ -403,7 +379,7 @@ class RCONProtocol(BaseProtocol):
         # Check if data is too big:
         if length_check and len(data) >= 1460:
             # Too big, raise an exception!
-            raise RCONLengthExeption("Packet type is too big!", len(data))
+            raise RCONLengthException("Packet type is too big!", len(data))
         # Sending packet:
         self.write_tcp(data)
 
@@ -415,7 +391,7 @@ class RCONProtocol(BaseProtocol):
         # Reading the rest of the packet:
         byts = self.read_tcp(length)
         # Generating packet:
-        pack = RCONPacket.from_bytes(byts)
+        pack = Packet.from_bytes(byts)
         return pack
 
 
@@ -498,25 +474,25 @@ class RCONClient(BaseClient):
     def is_authenticated(self) -> bool:
         return self.auth
 
-    def raw_send(self, reqtype: int, payload: str, frag_check: bool = True, length_check: bool = True) -> RCONPacket:
+    def raw_send(self, reqtype: int, payload: str, frag_check: bool = True, length_check: bool = True) -> Packet:
         if not self.is_connected():
             # Connection not started, user obviously wants to connect, so start it
             self.start()
         # Sending packet:
-        self.proto.send(RCONPacket(self.reqid, reqtype, payload), length_check=length_check)
+        self.proto.send(Packet(self.reqid, reqtype, payload), length_check=length_check)
         # Receiving response packet:
         pack = self.proto.read()
         # Check if our stuff is valid:
         if pack.reqid != self.reqid and self.is_authenticated() and reqtype != self.proto.LOGIN:
             # Client/server ID's do not match!
-            raise RCONMalformedPacketExeption("Client and server request ID's do not match!")
+            raise RCONMalformedPacketException("Client and server request ID's do not match!")
         elif pack.reqid != self.reqid and reqtype != self.proto.LOGIN:
             # Authentication issue!
-            raise RCONAuthenticationExeption("Client and server request ID's do not match! We are not authenticated!")
+            raise RCONAuthenticationException("Client and server request ID's do not match! We are not authenticated!")
         # Check if the packet is fragmented(And if we even care about fragmentation):
         if frag_check and pack.length >= self.proto.MAX_SIZE:
             # Send a junk packet:
-            self.proto.send(RCONPacket(self.reqid, 0, ''))
+            self.proto.send(Packet(self.reqid, 0, ''))
             # Read until we get a valid response:
             while True:
                 # Get a packet from the server:
@@ -526,7 +502,7 @@ class RCONClient(BaseClient):
                     break
                 if temp_pack.reqid != self.reqid:
                     # Client/server ID's do not match!
-                    raise RCONMalformedPacketExeption("Client and server request ID's do not match!")
+                    raise RCONMalformedPacketException("Client and server request ID's do not match!")
                 # Add the packet content to the master pack:
                 pack.payload = pack.payload + temp_pack.payload
         # Return our junk:
@@ -551,11 +527,11 @@ class RCONClient(BaseClient):
         return self.login(password)
 
     def command(self, com: str, check_auth: bool = True, format_method: int = None, return_packet: bool = False,
-                frag_check: bool = True, length_check: bool = True) -> Union[RCONPacket, str]:
+                frag_check: bool = True, length_check: bool = True) -> Union[Packet, str]:
         # Checking authentication status:
         if check_auth and not self.is_authenticated():
             # Not authenticated, let the user know this:
-            raise RCONAuthenticationExeption("Not authenticated to the RCON server!")
+            raise RCONAuthenticationException("Not authenticated to the RCON server!")
         # Sending command packet:
         pack = self.raw_send(self.proto.COMMAND, com, frag_check=frag_check, length_check=length_check)
         # Get the formatted content:
@@ -808,7 +784,7 @@ class ServerManagerApp:
 
     # Function to save configuration to file
     def save_config(self):
-        config_data = {
+        self.config_data = {
             "SteamCMD": self.steam_cmd_path.get(),
             "ARKServerPath": self.ark_server_path.get(),
             "ServerMAP": self.server_map.get(),
@@ -827,7 +803,7 @@ class ServerManagerApp:
         }
 
         with open(script_config, 'w') as config_file:
-            json.dump(config_data, config_file, indent=4)
+            json.dump(self.config_data, config_file, indent=4)
 
     def install_button_click(self):
         global task_thread
@@ -913,16 +889,16 @@ class ServerManagerApp:
             except FileNotFoundError:
                 return False
 
-        def downlaod_file(url, target_path=None):
-            if not target_path:
+        def downlaod_file(url, target_paths=None):
+            if not target_paths:
                 file_name = url.split('/')[-1]
-                target_path = os.path.join(os.environ['TEMP'], file_name)
+                target_paths = os.path.join(os.environ['TEMP'], file_name)
 
             response = requests.get(url, stream=True)
-            with open(target_path, 'wb') as file:
+            with open(target_paths, 'wb') as files:
                 for chunk in response.iter_content(chunk_size=1024):
                     if chunk:
-                        file.write(chunk)
+                        files.write(chunk)
 
         def install_component(url, output_file, arguments):
             component_path = os.path.join(os.environ['TEMP'], output_file)
@@ -1003,32 +979,52 @@ class ServerManagerApp:
             self.task_thread = threading.Thread(target=self.launch_ark)
             self.task_thread.start()
 
-    def updateconfig(self, target_setting, new_value, config="GameUserSettings.ini"):
-        path = os.path.join(self.config_data.get("ARKServerPath", ""), 'ShooterGame', 'Saved', 'Config',
-                            'WindowsServer', config)
+    # def update_config(self, target_setting, new_value, config="GameUserSettings.ini"):
+    #     path = os.path.join(self.config_data.get("ARKServerPath", ""), 'ShooterGame', 'Saved', 'Config',
+    #                         'WindowsServer', config)
+    #
+    #     if not os.path.exists(path):
+    #         os.makedirs(os.path.dirname(path), exist_ok=True)
+    #         with open(path, 'w') as file:
+    #             file.write("[ServerSettings]\n")
+    #
+    #     with open(path, 'r') as file:
+    #         lines = file.readlines()
+    #
+    #     found = False
+    #     for i, line in enumerate(lines):
+    #         if target_setting in line:
+    #             parts = line.split('=')
+    #             parts[1] = f'"{new_value}"\n'
+    #             lines[i] = '='.join(parts)
+    #             found = True
+    #             break
+    #
+    #     if not found:
+    #         lines.append(f"{target_setting}=\"{new_value}\"\n")
+    #
+    #     with open(path, 'w') as file:
+    #         file.writelines(lines)
 
-        if not os.path.exists(path):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'w') as file:
-                file.write("[ServerSettings]\n")
-
+    def update_config(self, target_setting, new_value, config="GameUserSettings.ini"):
+        path = os.path.join(self.config_data["ARKServerPath"], 'ShooterGame', 'Saved', 'Config', 'WindowsServer',
+                            config)
         with open(path, 'r') as file:
             lines = file.readlines()
 
-        found = False
-        for i, line in enumerate(lines):
-            if target_setting in line:
-                parts = line.split('=')
+        for i in range(len(lines)):
+            if target_setting in lines[i]:
+                parts = lines[i].split('=')
                 parts[1] = f'"{new_value}"\n'
                 lines[i] = '='.join(parts)
-                found = True
                 break
-
-        if not found:
-            lines.append(f"{target_setting}=\"{new_value}\"\n")
 
         with open(path, 'w') as file:
             file.writelines(lines)
+
+    def set_settings(self):
+        self.update_config("ServerPassword", self.config_data["Password"])
+        self.update_config("ServerAdminPassword", self.config_data["AdminPassword"])
 
     def launch_ark(self):
         ARKServerPath = self.config_data["ARKServerPath"]
@@ -1060,8 +1056,8 @@ class ServerManagerApp:
         else:
             rcon_enabled_value = "False"
 
-        self.updateconfig("ServerPassword", Password)
-        self.updateconfig("ServerAdminPassword", AdminPassword)
+        self.update_config("ServerPassword", Password)
+        self.update_config("ServerAdminPassword", AdminPassword)
 
         server_arguments = f'start {ServerMAP}?listen?SessionName="{ServerName}"?Port={Port}?QueryPort={QueryPort}?RCONEnabled={rcon_enabled_value}?RCONPort={RCONPort} -{battle_eye_value} -automanagedmods -mods={Mods}, -WinLiveMaxPlayers={MaxPlayers}, -{force_respawn_dinos_value}'
         print(server_arguments)
