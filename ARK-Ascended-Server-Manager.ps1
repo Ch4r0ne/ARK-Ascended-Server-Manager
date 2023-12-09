@@ -946,7 +946,7 @@ function Update-ARKServer {
     # Read the data from the configuration file
     $ConfigData = Get-Content -Path $ScriptConfig -Raw | ConvertFrom-Json
 
-    Start-Process -FilePath $SteamCMD\SteamCMD\steamcmd.exe -ArgumentList "+force_install_dir $ARKServerPath +login anonymous +app_update $AppID +quit" -Wait
+    Start-Process -FilePath $SteamCMD\SteamCMD\steamcmd.exe -ArgumentList "+force_install_dir $ARKServerPath +login anonymous +app_update 2430930 +quit" -Wait
 }
 
 function Update-Config {
