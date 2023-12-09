@@ -44,7 +44,7 @@ if ($runningProcess) {
     Write-Host "The Prozess '$processName' not running."
 }
 
-Start-Process -FilePath "$($ConfigData.SteamCMD)\SteamCMD\steamcmd.exe" -ArgumentList "+force_install_dir $($ConfigData.ARKServerPath) +login anonymous +app_update $($ConfigData.AppID) +quit" -Wait
+Start-Process -FilePath "$($ConfigData.SteamCMD)\SteamCMD\steamcmd.exe" -ArgumentList "+force_install_dir $($ConfigData.ARKServerPath) +login anonymous +app_update 2430930 +quit" -Wait
 
 foreach ($property in @("ServerMAP", "ServerName", "Port", "QueryPort", "Password", "AdminPassword", "Mods", "MaxPlayers")) {
     if ($ConfigData.$property -ne $null) {
