@@ -16,8 +16,9 @@ $DefaultConfig = @{
     Mods= ""
     RCONPort = "27020"
     RCONEnabled = "True"
-    ForceRespawnDinos = $false  # Set the default value as a boolean"
+    ForceRespawnDinos = $false
     ServerIP = "localhost"
+    ServerPlatform = "PC+XSX+WINGDK"
 }
 
 # Create configuration folder and file if not exists
@@ -44,8 +45,9 @@ function Save-Config {
         Mods = $ModsTextBox.Text
         RCONPort = $RCONPortTextBox.Text
         RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
-        ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+        ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked
         ServerIP = $ServerIPTextBox.Text
+        ServerPlatform = $ServerPlatformTextBox.Text
     }
     $ConfigData | ConvertTo-Json | Set-Content -Path $ScriptConfig -Force
 }
@@ -84,6 +86,7 @@ $RCONPort = $ConfigData.RCONPort
 $RCONEnabled = $ConfigData.RCONEnabled
 $ForceRespawnDinos = $ConfigData.ForceRespawnDinos
 $ServerIP = $ConfigData.ServerIP
+$ServerPlatform = $ConfigData.ServerPlatform
 
 # Create GUI window
 $Form = New-Object Windows.Forms.Form
@@ -277,6 +280,19 @@ $ForceRespawnDinosCheckBox = New-Object Windows.Forms.CheckBox
 $ForceRespawnDinosCheckBox.Location = New-Object Drawing.Point(200, 440)
 $ForceRespawnDinosCheckBox.Size = New-Object Drawing.Size(20, 20)
 $Form.Controls.Add($ForceRespawnDinosCheckBox)
+
+# Server Platform
+$ServerPlatformLabel = New-Object Windows.Forms.Label
+$ServerPlatformLabel.Text = "Server Platform:"
+$ServerPlatformLabel.AutoSize = $true
+$ServerPlatformLabel.Location = New-Object Drawing.Point(250, 440)  # Adjusted X coordinate
+$Form.Controls.Add($ServerPlatformLabel)
+
+$ServerPlatformTextBox = New-Object Windows.Forms.TextBox
+$ServerPlatformTextBox.Location = New-Object Drawing.Point(400, 440)  # Adjusted X coordinate
+$ServerPlatformTextBox.Size = New-Object Drawing.Size(120, 20)
+$Form.Controls.Add($ServerPlatformTextBox)
+$ServerPlatformTextBox.Text = "PC+XSX+WINGDK"
 
 # Command Input Field
 $CommandLabel = New-Object Windows.Forms.Label
@@ -756,6 +772,7 @@ function Update-GUIFromConfig {
     $RCONEnabledComboBox.SelectedItem = $RCONEnabled
     $ForceRespawnDinosCheckBox.Checked = [System.Boolean]::Parse($ConfigData.ForceRespawnDinos)  # Set checkbox value based on the saved boolean value
     $ServerIPTextBox.Text =  $ServerIP
+    $ServerPlatformTextBox.Text = $ServerPlatform
 
 }
 
@@ -847,7 +864,7 @@ function Send-RconCommand {
 
 # Function Download Backup Tool
 function Download-BackupTool {
-    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.2/BackupJobSchedulerGUI.msi"
+    $BackupToolURL = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi"
     
     # Extrahiere den Dateinamen aus der URL
     $fileName = [System.IO.Path]::GetFileName($BackupToolURL)
@@ -910,6 +927,7 @@ function Start-ARKServer {
     $BattleEye = $ConfigData.BattleEye
     $Mods = $ConfigData.Mods.Trim()
     $MaxPlayer = $ConfigData.MaxPlayer
+    $ServerPlatform = $ConfigData.ServerPlatform
 
     $ForceRespawnDinos = $ConfigData.ForceRespawnDinos
     if ($ForceRespawnDinos -eq $true) {
@@ -921,7 +939,10 @@ function Start-ARKServer {
     $MaxPlayers = $ConfigData.MaxPlayers.Trim()
 
     # Create the ServerArguments string with formatting
-    $ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?RCONEnabled={7}?RCONPort={8}?ServerAdminPassword="{5}" -{9} -automanagedmods -mods={10}, -WinLiveMaxPlayers={6}, -{11}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $BattleEye, $Mods, $ForceRespawnDinosValue)
+    $ServerArguments = [System.String]::Format('start {0}?listen?SessionName="{1}"?Port={2}?QueryPort={3}?ServerPassword="{4}"?RCONEnabled={7}?RCONPort={8}?ServerAdminPassword="{5}" -{9} -automanagedmods -mods={10}, -WinLiveMaxPlayers={6}, -{11}, -ServerPlatform={12}', $ServerMAP, $ServerName, $Port, $QueryPort, $Password, $AdminPassword, $MaxPlayers, $RCONEnabled, $RCONPort, $BattleEye, $Mods, $ForceRespawnDinosValue, $ServerPlatform)
+
+
+
 
     # Check the ServerArguments string
     Write-Output "ServerArguments: $ServerArguments"
@@ -964,8 +985,9 @@ function Update-Config {
     $ConfigData.Mods = $ModsTextBox.Text
     $ConfigData.RCONPort = $RCONPortTextBox.Text
     $ConfigData.RCONEnabled = $RCONEnabledComboBox.SelectedItem.ToString()
-    $ConfigData.ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked  # Convert the checkbox value to boolean
+    $ConfigData.ForceRespawnDinos = $ForceRespawnDinosCheckBox.Checked
     $ConfigData.ServerIP = $ServerIPTextBox.Text  # Save Server IP
+    $ConfigData.ServerPlatform = $ServerPlatformTextBox.Text
 
 
     # Update global variables with new values
@@ -982,8 +1004,9 @@ function Update-Config {
     $script:Mods = $ConfigData.Mods
     $script:RCONPort = $ConfigData.RCONPort
     $script:RCONEnabled = $ConfigData.RCONEnabled
-    $script:ForceRespawnDinos = $ConfigData.ForceRespawnDinos  # Assign boolean value directly
-    $script:ServerIP = $ConfigData.ServerIP  # Assign Server IP
+    $script:ForceRespawnDinos = $ConfigData.ForceRespawnDinos
+    $script:ServerIP = $ConfigData.ServerIP
+    $script:ServerPlatform = $ConfigData.ServerPlatform
 
     Save-Config
 }
