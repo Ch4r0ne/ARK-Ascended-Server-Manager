@@ -1,34 +1,50 @@
 # ARK Ascended Server Manager
+[![Discord](https://img.shields.io/badge/Discord-%237289DA.svg?logo=discord&logoColor=white)](https://discord.gg/7tvmSdXcEH)
 
-ARK Ascended Server Manager is a powerful PowerShell script that simplifies the management of ARK Survival Ascended Servers with a user-friendly graphical interface.
+ARK Ascended Server Manager simplifies the management of ARK Survival Ascended Servers with ease and efficiency.
 
-## Features
+## Key Features
 
-- **Easy configuration**: Configure server parameters effortlessly through the intuitive user interface, including installation path, map, server name and player limit. All configurations are stored in a JSON file and are easily accessible.
-- **Easy installation**: The script automates the installation process using SteamCMD for a hassle-free ARK server setup. No need to navigate through complex command lines - the script takes care of everything.
-- **Automatic Updates**: Stay up to date with the latest patches and content by simply updating the server with SteamCMD. Your server is always up to date, without any effort.
-- **One-click server launch**: Start your ARK game server with a single click. The script creates precise command line arguments based on your configuration, eliminating the need for manual input.
-- **RCON transmission**: Function for sending commands via the console in the graphical user interface.
-- **Display online player count and status**: Display the number of people playing online.
-- **Update check**: Automatically check for updates.
-- **Edit configuration files**: Access and modify 'Game.ini' and 'GameUserSettings.ini'.
+- **Simple Configuration**: Adjust server settings effortlessly through an intuitive interface.
+- **Seamless Installation**: Automated setup using SteamCMD for hassle-free server deployment.
+- **Automatic Updates**: Keep your server current with seamless patching via SteamCMD.
+- **One-Click Launch**: Start your server with a single click.
+- **RCON Integration**: Send commands via the console.
+- **Configuration Editing**: Modify 'Game.ini' and 'GameUserSettings.ini' easily.
 
 ## Compatibility
 
-Developed for Windows Server 2022/2019
+Compatible with Windows Server 2022/2019.
 
-![ASA_Server_Manager_Preview.png](Preview/ASA_Server_Manager_Preview_1.png)
+![Preview](Preview/ASA_Server_Manager_Preview_1.png)
 
-## Automatic backup with backup tool
+## Automatic Backup Tool
 
-I have developed another tool for the project, which is available as [Backup-Tool](https://github.com/Ch4r0ne/Backup-Tool). It was designed specifically for this project and offers an efficient and user-friendly solution for automatic data backup.
+Enhance management with our dedicated [Backup Tool](https://github.com/Ch4r0ne/Backup-Tool).
 
-## Port forward Ports
-Port = 27015 - UDP (default port is 7777)
-QueryPort = 27016 - TCP (currently not yet in use)
+## Port Forwarding
 
-    New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27015 -Protocol UDP -Action Allow
-    New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol UDP -Action Allow
+Configure port forwarding:
+
+- Port: 27015 (UDP) - Default: 7777
+```powershell
+New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27015 -Protocol UDP -Action Allow
+```
+- QueryPort: 27016 (TCP) - Not in use
+```powershell
+New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol UDP -Action Allow
+```
+
+# Parameter Overview
+
+For a comprehensive overview of parameters, please refer to the [Server Configuration](https://ark.wiki.gg/wiki/Server_configuration).
+
+## Manual Setup Guide
+
+For detailed setup instructions, please visit the [Dedicated Server Setup](https://ark.wiki.gg/wiki/Dedicated_server_setup#Windows_Server_editions_and_crossplay_with_Epic_players) page.
+
+If you prefer not to use the manager, an automatic installation script for the certificate is available: [UnrealEngine_Dedicated_Server_Install_CA](https://github.com/Ch4r0ne/UnrealEngine_Dedicated_Server_Install_CA#UnrealEngine_Dedicated_Server_Install_CA)
 
 ## 🐞 Found a Bug? Help Us Improve!
 Welcome to the preview release of ARK-Ascended-Server-Manager! Your feedback is invaluable as we refine the application. If you encounter any bugs or unexpected behavior, please report them on GitHub. Your reports guide us toward a seamless user experience. Thank you for your support!
+
