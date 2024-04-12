@@ -32,7 +32,7 @@ New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 2701
 ```
 - QueryPort: 27016 (TCP) - Not in use
 ```powershell
-New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol UDP -Action Allow
+New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol TCP -Action Allow
 ```
 
 # Parameter Overview
