@@ -49,12 +49,12 @@ If you prefer not to use the manager, an automatic installation script for the c
 Welcome to the preview release of ARK-Ascended-Server-Manager! Your feedback is invaluable as we refine the application. If you encounter any bugs or unexpected behavior, please report them on GitHub. Your reports guide us toward a seamless user experience. Thank you for your support!
 
 ## External Resources Used in this Script
-- **mcrcon for RCON**: [Download Link](https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-windows-x86-64.zip)
-- **AutoUpdateJob (if selected)**: [Script Link](https://raw.githubusercontent.com/Ch4r0ne/ARK-Ascended-Server-Manager/main/AutoUpdateJob.ps1)
-- **Backup Tool (if selected)**: [Download Link](https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi)
-- **SteamCMD**: [Download Link](https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip)
-- **Visual C++ Redistributable**: [Download Link](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-- **DirectX Runtime**: [Download Link](https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe)
+- **mcrcon for RCON**: [https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-windows-x86-64.zip](https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-windows-x86-64.zip)
+- **AutoUpdateJob (if selected)**: [https://raw.githubusercontent.com/Ch4r0ne/ARK-Ascended-Server-Manager/main/AutoUpdateJob.ps1](https://raw.githubusercontent.com/Ch4r0ne/ARK-Ascended-Server-Manager/main/AutoUpdateJob.ps1)
+- **Backup Tool (if selected)**: [https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi](https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi)
+- **SteamCMD**: [https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip](https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip)
+- **Visual C++ Redistributable**: [https://aka.ms/vs/17/release/vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+- **DirectX Runtime**: [https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe](https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe)
 - **Amazon Certificate**:
-  - Root CA1: [Download Link](https://www.amazontrust.com/repository/AmazonRootCA1.cer)
-  - Root CA r2m02: [Download Link](http://crt.r2m02.amazontrust.com/r2m02.cer)
+  - Root CA1: [https://www.amazontrust.com/repository/AmazonRootCA1.cer](https://www.amazontrust.com/repository/AmazonRootCA1.cer)
+  - Root CA r2m02: [http://crt.r2m02.amazontrust.com/r2m02.cer](http://crt.r2m02.amazontrust.com/r2m02.cer)
