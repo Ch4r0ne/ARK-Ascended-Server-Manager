@@ -18,6 +18,8 @@ Compatible with Windows Server 2022/2019.
 
 ![Preview](Preview/ASA_Server_Manager_Preview_1.png)
 
+
+
 ## Automatic Backup Tool
 
 Enhance management with our dedicated [Backup Tool](https://github.com/Ch4r0ne/Backup-Tool).
@@ -34,6 +36,14 @@ New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 2701
 ```powershell
 New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol TCP -Action Allow
 ```
+
+## Troubleshooting
+
+### Check Admin Rights
+It is crucial to execute the script with administrative privileges during the initial installation. For subsequent updates and server startups, this requirement is not necessary. Failure to execute the script with admin rights may result in the absence of necessary certificates required for server listening.
+
+### Verify Port and Certificates
+If using a separate `netstat -aon` command, ensure that the desired port, e.g., 7777, is listening on your ASA Server. Match the PID in Task Manager with the ID shown in the netstat output, for example, "UDP 0.0.0.0:7777 *:* 17546". Activate the filter by Name in Task Manager to locate the PID associated with the process. Only when this port is actively listening will your server be listed. Otherwise, there may be an issue with the certificates.
 
 # Parameter Overview
 
