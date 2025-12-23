@@ -826,36 +826,36 @@ function Create-OrUpdateScheduledAutoUpdate {
 # =========================
 # Backup Tool Download
 # =========================
-function Get-SaveFileLocation {
-    param(
-        [string]$Title,
-        [string]$Filter,
-        [string]$FileName
-    )
-    Add-Type -AssemblyName System.Windows.Forms | Out-Null
-    $dlg = New-Object System.Windows.Forms.SaveFileDialog
-    $dlg.Title = $Title
-    $dlg.Filter = $Filter
-    $dlg.FileName = $FileName
-    $res = $dlg.ShowDialog()
-    if ($res -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
-    return ""
-}
-
-function Download-BackupTool {
-    if (-not (Test-IsAdmin)) { throw "Backup tool download requires Administrator privileges." }
-
-    $url = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi"
-    $fileName = [IO.Path]::GetFileName($url)
-    $path = Get-SaveFileLocation -Title "Select download location" -Filter "MSI Files (*.msi)|*.msi" -FileName $fileName
-    if (-not $path) { return }
-
-    Invoke-Download -Uri $url -OutFile $path -Retries 3 -MinBytes 200KB
-
-    $cfg = Read-Config
-    $cfg.BackupMsiLastPath = $path
-    Write-Config -Config $cfg
-}
+#function Get-SaveFileLocation {
+#    param(
+#        [string]$Title,
+#        [string]$Filter,
+#        [string]$FileName
+#    )
+#    Add-Type -AssemblyName System.Windows.Forms | Out-Null
+#    $dlg = New-Object System.Windows.Forms.SaveFileDialog
+#    $dlg.Title = $Title
+#    $dlg.Filter = $Filter
+#    $dlg.FileName = $FileName
+#    $res = $dlg.ShowDialog()
+#    if ($res -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
+#    return ""
+#}
+#
+#function Download-BackupTool {
+#    if (-not (Test-IsAdmin)) { throw "Backup tool download requires Administrator privileges." }
+#
+#    $url = "https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi"
+#    $fileName = [IO.Path]::GetFileName($url)
+#    $path = Get-SaveFileLocation -Title "Select download location" -Filter "MSI Files (*.msi)|*.msi" -FileName $fileName
+#    if (-not $path) { return }
+#
+#    Invoke-Download -Uri $url -OutFile $path -Retries 3 -MinBytes 200KB
+#
+#    $cfg = Read-Config
+#    $cfg.BackupMsiLastPath = $path
+#    Write-Config -Config $cfg
+#}
 
 # =========================
 # Server Args
@@ -932,16 +932,16 @@ function Stop-ArkServerViaRcon {
     [void](Invoke-Rcon -ServerIP $cfg.ServerIP -RCONPort $port -AdminPassword $cfg.AdminPassword -Command "doexit")
 }
 
-function Get-PlayerCountViaRcon {
-    param([hashtable]$cfg)
-
-    $port = [int]$cfg.RCONPort
-    $out = Invoke-Rcon -ServerIP $cfg.ServerIP -RCONPort $port -AdminPassword $cfg.AdminPassword -Command "listplayers"
-
-    if ($out -match "No Players Connected") { return 0 }
-    $lines = ($out -split "`r?`n") | Where-Object { $_.Trim() }
-    return $lines.Count
-}
+#function Get-PlayerCountViaRcon {
+#    param([hashtable]$cfg)
+#
+#    $port = [int]$cfg.RCONPort
+#    $out = Invoke-Rcon -ServerIP $cfg.ServerIP -RCONPort $port -AdminPassword $cfg.AdminPassword -Command "listplayers"
+#
+#    if ($out -match "No Players Connected") { return 0 }
+#    $lines = ($out -split "`r?`n") | Where-Object { $_.Trim() }
+#    return $lines.Count
+#}
 
 # =========================
 # INI Open
@@ -1407,7 +1407,7 @@ function Save-ConfigFromGui {
         if ($gui.Contains($k)) { $script:Config[$k] = $gui[$k] }
     }
     Write-Config -Config $script:Config
-    $PlayerCountLabel.Text = "Players Online: 0/$($script:Config.MaxPlayers)"
+#    $PlayerCountLabel.Text = "Players Online: 0/$($script:Config.MaxPlayers)"
 }
 
 function Apply-ConfigToGui {
@@ -1438,7 +1438,7 @@ function Apply-ConfigToGui {
     $ServerArgsTextBox.Text = $cfg.CustomServerArgs
 
     Ensure-UiDefaults
-    $PlayerCountLabel.Text = "Players Online: 0/$($cfg.MaxPlayers)"
+#    $PlayerCountLabel.Text = "Players Online: 0/$($cfg.MaxPlayers)"
 }
 
 function Update-ArgsUiState {
@@ -1781,15 +1781,15 @@ $SendCommandButton.Add_Click({
     } catch { Show-Error $_.Exception.Message }
 })
 
-$UpdatePlayerCountButton.Add_Click({
-    try {
-        Ensure-UiDefaults
-        Save-ConfigFromGui
-        $cfg = Get-ConfigFromGui
-        $count = Get-PlayerCountViaRcon -cfg $cfg
-        $PlayerCountLabel.Text = "Players Online: $count/$($cfg.MaxPlayers)"
-    } catch { Show-Error $_.Exception.Message }
-})
+#$UpdatePlayerCountButton.Add_Click({
+#    try {
+#        Ensure-UiDefaults
+#        Save-ConfigFromGui
+#        $cfg = Get-ConfigFromGui
+#        $count = Get-PlayerCountViaRcon -cfg $cfg
+#        $PlayerCountLabel.Text = "Players Online: $count/$($cfg.MaxPlayers)"
+#    } catch { Show-Error $_.Exception.Message }
+#})
 
 $OpenGUSButton.Add_Click({
     try {
@@ -1841,12 +1841,12 @@ $AutoUpdateButton.Add_Click({
     } catch { Show-Error $_.Exception.Message }
 })
 
-$BackupButton.Add_Click({
-    try {
-        Download-BackupTool
-        Show-Info "Backup tool downloaded."
-    } catch { Show-Error $_.Exception.Message }
-})
+#$BackupButton.Add_Click({
+#    try {
+#        Download-BackupTool
+#        Show-Info "Backup tool downloaded."
+#    } catch { Show-Error $_.Exception.Message }
+#})
 
 if ($script:LimitedMode) {
     $FirstInstallButton.Enabled = $false
