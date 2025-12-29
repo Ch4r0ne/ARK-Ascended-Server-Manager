@@ -1,4 +1,6 @@
+# ark_asa_manager.py
 # ARK: Survival Ascended Dedicated Server Manager (Windows)
+# Python 3.10+ | Tkinter GUI | Stdlib + optional: pip install rcon
 
 from __future__ import annotations
 
@@ -42,6 +44,10 @@ STEAMCMD_ZIP_URL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zi
 VC_REDIST_X64_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 DXWEBSETUP_URL = "https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
 
+# Certificates (requested)
+AMAZON_ROOT_CA1_URL: str = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
+AMAZON_R2M02_URL: str = "https://crt.r2m02.amazontrust.com/r2m02.cer"
+
 DEFAULT_STEAMCMD_DIR = r"C:\GameServer\SteamCMD"
 DEFAULT_SERVER_DIR = r"C:\GameServer\ARK-Survival-Ascended-Server"
 DEFAULT_MAP = "TheIsland_WP"
@@ -80,6 +86,15 @@ GAMEUSERSETTINGS_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\GameUserSet
 GAME_INI_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\Game.ini")
 
 LOG_LEVEL = logging.INFO
+
+# DirectX legacy detection (requested: combine registry + legacy DLL presence)
+DIRECTX_LEGACY_DLLS = [
+    "d3dx9_43.dll",
+    "d3dx10_43.dll",
+    "d3dx11_43.dll",
+    "d3dcompiler_43.dll",
+    "xinput1_3.dll",
+]
 
 
 # =============================================================================
@@ -185,6 +200,19 @@ def download_file(url: str, dest: Path, logger: logging.Logger, timeout: int = D
     logger.info(f"Saved: {dest}")
 
 
+def download_file_with_certutil_fallback(url: str, dest: Path, logger: logging.Logger) -> None:
+    try:
+        download_file(url, dest, logger)
+        return
+    except Exception as e:
+        logger.info(f"Download failed via urllib: {e} -> fallback to certutil urlcache.")
+    ensure_dir(dest.parent)
+    cmd = ["certutil", "-urlcache", "-split", "-f", url, str(dest)]
+    code = run_and_stream(cmd, logger)
+    if code != 0 or not dest.exists():
+        raise RuntimeError(f"Failed to download via certutil (exit={code}): {url}")
+
+
 def run_and_stream(cmd: List[str], logger: logging.Logger, cwd: Optional[Path] = None) -> int:
     logger.info(" ".join(cmd))
     p = subprocess.Popen(
@@ -235,7 +263,7 @@ class AppConfig:
     validate_on_update: bool = False
 
     backup_on_stop: bool = True
-    backup_dir: str = ""          # empty => appdata/backups
+    backup_dir: str = ""  # empty => appdata/backups
     backup_retention: int = 20
     backup_include_configs: bool = False
 
@@ -316,7 +344,7 @@ class ConfigStore:
                     setattr(cfg, k, v)
                 except Exception:
                     pass
-        # normalize list type if needed
+
         if not isinstance(cfg.rcon_saved_commands, list):
             cfg.rcon_saved_commands = ["SaveWorld", "DoExit", "ListPlayers", "DestroyWildDinos"]
         return cfg
@@ -356,10 +384,36 @@ def vc14_x64_version() -> Optional[str]:
         return None
 
 
+def directx_registry_present() -> bool:
+    if winreg is None:
+        return False
+    try:
+        with reg_open_key_64(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\DirectX"):
+            return True
+    except Exception:
+        return False
+
+
+def has_directx_legacy(min_hits: int = 3) -> bool:
+    if os.name != "nt":
+        return False
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    candidates = [
+        Path(windir) / "System32",
+        Path(windir) / "SysWOW64",
+    ]
+    hits = 0
+    for folder in candidates:
+        for dll in DIRECTX_LEGACY_DLLS:
+            if (folder / dll).exists():
+                hits += 1
+    return hits >= min_hits
+
+
 def install_vcredist(logger: logging.Logger) -> None:
     temp = Path(os.environ.get("TEMP", str(Path.home() / "AppData/Local/Temp")))
     exe = temp / "vc_redist.x64.exe"
-    download_file(VC_REDIST_X64_URL, exe, logger)
+    download_file_with_certutil_fallback(VC_REDIST_X64_URL, exe, logger)
     code = run_and_stream([str(exe), "/install", "/passive", "/norestart"], logger)
     logger.info(f"VC++ installer exit code: {code}")
 
@@ -367,9 +421,36 @@ def install_vcredist(logger: logging.Logger) -> None:
 def install_directx_web(logger: logging.Logger) -> None:
     temp = Path(os.environ.get("TEMP", str(Path.home() / "AppData/Local/Temp")))
     exe = temp / "dxwebsetup.exe"
-    download_file(DXWEBSETUP_URL, exe, logger)
+    download_file_with_certutil_fallback(DXWEBSETUP_URL, exe, logger)
     code = run_and_stream([str(exe), "/Q"], logger)
     logger.info(f"DirectX web installer exit code: {code}")
+
+
+def install_asa_certificates(logger: logging.Logger) -> None:
+    temp = Path(os.environ.get("TEMP", str(Path.home() / "AppData/Local/Temp")))
+    root_path = temp / "AmazonRootCA1.cer"
+    r2m02_path = temp / "r2m02.cer"
+
+    download_file_with_certutil_fallback(AMAZON_ROOT_CA1_URL, root_path, logger)
+    download_file_with_certutil_fallback(AMAZON_R2M02_URL, r2m02_path, logger)
+
+    user_flag: List[str] = []
+    if not is_admin():
+        user_flag = ["-user"]
+        logger.info("Certificate install: non-admin -> CurrentUser store (-user).")
+    else:
+        logger.info("Certificate install: admin -> LocalMachine store.")
+
+    def add(store: str, path: Path) -> None:
+        cmd = ["certutil", *user_flag, "-addstore", "-f", store, str(path)]
+        code = run_and_stream(cmd, logger)
+        if code != 0:
+            raise RuntimeError(f"certutil failed (store={store}, file={path.name}), exit code={code}")
+
+    logger.info("Installing certificates: AmazonRootCA1 -> Root, r2m02 -> CA")
+    add("Root", root_path)
+    add("CA", r2m02_path)
+    logger.info("Certificates installed/updated successfully.")
 
 
 # =============================================================================
@@ -387,7 +468,7 @@ def ensure_steamcmd(steamcmd_dir: Path, logger: logging.Logger) -> Path:
             return c
 
     zip_path = steamcmd_dir / "steamcmd.zip"
-    download_file(STEAMCMD_ZIP_URL, zip_path, logger)
+    download_file_with_certutil_fallback(STEAMCMD_ZIP_URL, zip_path, logger)
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(steamcmd_dir)
     try:
@@ -627,11 +708,6 @@ class BuiltinRCONClient:
 
 
 def get_rcon_client_factory() -> Callable[[str, int, str, float], Any]:
-    """
-    Preferred: pip install rcon (conqp/rcon). API:
-      from rcon.source import Client
-      with Client(host, port, passwd='pw') as c: c.run('cmd', 'args')
-    """
     try:
         from rcon.source import Client as SourceClient  # type: ignore
 
@@ -644,9 +720,8 @@ def get_rcon_client_factory() -> Callable[[str, int, str, float], Any]:
                 self._c: Optional[SourceClient] = None
 
             def __enter__(self) -> "_Adapter":
-                # conqp/rcon uses passwd=..., no authenticate() method
                 self._c = SourceClient(self.host, self.port, passwd=self.password, timeout=self.timeout)
-                self._c.__enter__()  # open socket + auth
+                self._c.__enter__()
                 return self
 
             def __exit__(self, exc_type, exc, tb) -> None:
@@ -715,7 +790,6 @@ def build_server_command(cfg: AppConfig) -> List[str]:
     if mods:
         flags.append(f"-mods={mods}")
 
-    # Cluster
     if cfg.cluster_enable:
         cid = cfg.cluster_id.strip()
         if not cid:
@@ -731,11 +805,9 @@ def build_server_command(cfg: AppConfig) -> List[str]:
     if cfg.no_transfer_from_filtering:
         flags.append("-NoTransferFromFiltering")
 
-    # Dino mode (mutual exclusive)
     if cfg.dino_mode.strip():
         flags.append(f"-{cfg.dino_mode.strip()}")
 
-    # Logs
     if cfg.log_servergamelog:
         flags.append("-servergamelog")
     if cfg.log_servergamelogincludetribelogs:
@@ -743,7 +815,6 @@ def build_server_command(cfg: AppConfig) -> List[str]:
     if cfg.log_serverrconoutputtribelogs:
         flags.append("-ServerRCONOutputTribeLogs")
 
-    # Mechanics / Performance
     if cfg.mech_disablecustomcosmetics:
         flags.append("-DisableCustomCosmetics")
     if cfg.mech_autodestroystructures:
@@ -844,14 +915,12 @@ def restore_baseline_to_server(app_base: Path, server_dir: Path, logger: logging
 def ensure_required_server_settings(cfg: AppConfig, app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
     ensure_dir((server_dir / GAMEUSERSETTINGS_REL).parent)
 
-    # Prefer editing the staging copy if it exists (keeps UI consistent)
     stage_gus, _ = staging_paths(app_base, server_dir)
     src = stage_gus if stage_gus.exists() else (server_dir / GAMEUSERSETTINGS_REL)
 
     doc = read_ini(src)
     sec = "ServerSettings"
 
-    # Always write passwords and RCON settings into INI (not cmdline)
     doc.set(sec, "ServerAdminPassword", (cfg.admin_password or "").strip())
     doc.set(sec, "ServerPassword", (cfg.join_password or "").strip())
 
@@ -998,7 +1067,6 @@ class ServerManagerApp:
 
         self._rcon_factory = get_rcon_client_factory()
 
-        # INI editor state
         self._ini_loaded_target: Optional[str] = None  # "gus" | "game"
         self._ini_doc: Optional[IniDocument] = None
         self._ini_items_index: Dict[str, Tuple[str, str]] = {}
@@ -1025,11 +1093,9 @@ class ServerManagerApp:
     def _init_vars(self) -> None:
         m = self.root
 
-        # Paths
         self.var_steamcmd_dir = tk.StringVar(master=m)
         self.var_server_dir = tk.StringVar(master=m)
 
-        # Server
         self.var_map_preset = tk.StringVar(master=m)
         self.var_map_custom = tk.StringVar(master=m)
         self.var_server_name = tk.StringVar(master=m)
@@ -1045,25 +1111,20 @@ class ServerManagerApp:
         self.var_automanaged_mods = tk.BooleanVar(master=m)
         self.var_validate_on_update = tk.BooleanVar(master=m)
 
-        # RCON
         self.var_enable_rcon = tk.BooleanVar(master=m)
         self.var_rcon_host = tk.StringVar(master=m)
         self.var_rcon_port = tk.StringVar(master=m)
 
-        # Backup
         self.var_backup_on_stop = tk.BooleanVar(master=m)
         self.var_backup_dir = tk.StringVar(master=m)
         self.var_backup_retention = tk.StringVar(master=m)
         self.var_backup_include_configs = tk.BooleanVar(master=m)
 
-        # Auto update
         self.var_auto_update_restart = tk.BooleanVar(master=m)
         self.var_auto_update_interval_min = tk.StringVar(master=m)
 
-        # Status
         self.var_status = tk.StringVar(master=m)
 
-        # Advanced args
         self.var_cluster_enable = tk.BooleanVar(master=m)
         self.var_cluster_id = tk.StringVar(master=m)
         self.var_cluster_custom_path_enable = tk.BooleanVar(master=m)
@@ -1090,11 +1151,9 @@ class ServerManagerApp:
         self.var_m_stasiskeepcontrollers = tk.BooleanVar(master=m)
         self.var_m_ignoredupeditems = tk.BooleanVar(master=m)
 
-        # RCON UX
         self.var_rcon_cmd = tk.StringVar(master=m)
         self.var_rcon_saved = tk.StringVar(master=m)
 
-        # INI UX
         self.var_ini_filter = tk.StringVar(master=m)
         self.var_ini_key = tk.StringVar(master=m)
         self.var_ini_section = tk.StringVar(master=m)
@@ -1192,7 +1251,6 @@ class ServerManagerApp:
         ttk.Label(lf_server, text="Admin Password (RCON/Admin)").grid(row=7, column=0, sticky="w")
         ttk.Entry(lf_server, textvariable=self.var_admin_password).grid(row=7, column=1, sticky="ew", padx=6)
 
-        # Mods as multi-line list + horizontal scrollbar under field
         ttk.Label(lf_server, text="Mods (comma separated)").grid(row=8, column=0, sticky="nw", pady=(6, 0))
         mods_frame = ttk.Frame(lf_server)
         mods_frame.grid(row=8, column=1, sticky="ew", padx=6, pady=(6, 0))
@@ -1205,7 +1263,6 @@ class ServerManagerApp:
         xscroll.grid(row=1, column=0, sticky="ew", pady=(2, 0))
         self.txt_mods.configure(xscrollcommand=xscroll.set)
 
-        # Options
         ttk.Checkbutton(lf_ops, text="Enable BattlEye", variable=self.var_enable_battleye).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(lf_ops, text="Automanaged Mods", variable=self.var_automanaged_mods).grid(row=1, column=0, sticky="w")
         ttk.Checkbutton(lf_ops, text="Enable RCON", variable=self.var_enable_rcon).grid(row=2, column=0, sticky="w")
@@ -1404,17 +1461,14 @@ class ServerManagerApp:
         ttk.Label(editor, text="Key").grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(editor, textvariable=self.var_ini_key, state="readonly").grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
 
-        self.row_value_label = ttk.Label(editor, text="Value")
-        self.row_value_label.grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(editor, text="Value").grid(row=2, column=0, sticky="w", pady=(10, 0))
 
-        # Value widgets
         self.ent_ini_value = ttk.Entry(editor, textvariable=self.var_ini_value)
         self.cmb_ini_bool = ttk.Combobox(editor, textvariable=self.var_ini_bool, state="readonly", values=["True", "False"])
 
         self.ent_ini_value.grid(row=2, column=1, sticky="ew", padx=6, pady=(10, 0))
         self.cmb_ini_bool.grid_forget()
 
-        # Slider + ticks
         self.scale_ini = ttk.Scale(editor, variable=self.var_ini_scale, from_=0.0, to=10.0, command=self._ini_scale_changed)
         self.scale_ini.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
@@ -1428,7 +1482,6 @@ class ServerManagerApp:
             wraplength=360
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
-        # Auto-apply bindings (INI)
         self.ent_ini_value.bind("<KeyRelease>", lambda e: self._ini_schedule_apply())
         self.cmb_ini_bool.bind("<<ComboboxSelected>>", lambda e: self._ini_schedule_apply())
 
@@ -1461,7 +1514,6 @@ class ServerManagerApp:
         self.txt_mods.insert("end", (csv or "").strip())
 
     def _mods_text_get(self) -> str:
-        # User may paste CSV or newline-separated => always normalize to CSV
         raw = self.txt_mods.get("1.0", "end").strip()
         if not raw:
             return ""
@@ -1598,7 +1650,6 @@ class ServerManagerApp:
         cfg.mech_stasiskeepcontrollers = bool(self.var_m_stasiskeepcontrollers.get())
         cfg.mech_ignoredupeditems = bool(self.var_m_ignoredupeditems.get())
 
-        # RCON saved commands
         cfg.rcon_saved_commands = self.cfg.rcon_saved_commands[:] if isinstance(self.cfg.rcon_saved_commands, list) else []
         if not cfg.rcon_saved_commands:
             cfg.rcon_saved_commands = ["SaveWorld", "DoExit", "ListPlayers", "DestroyWildDinos"]
@@ -1784,7 +1835,7 @@ class ServerManagerApp:
         open_folder(d)
 
     # ---------------------------------------------------------------------
-    # Dependencies
+    # Dependencies (First Install)
     # ---------------------------------------------------------------------
     def _ensure_dependencies_first_install(self, logger: logging.Logger) -> None:
         v = vc14_x64_version()
@@ -1794,9 +1845,19 @@ class ServerManagerApp:
             logger.info("VC++ v14 x64 missing -> installing...")
             install_vcredist(logger)
 
-        # DirectX legacy: always install (requested)
-        logger.info("DirectX legacy -> installing (forced).")
-        install_directx_web(logger)
+        dx_reg = directx_registry_present()
+        dx_legacy = has_directx_legacy()
+
+        if dx_reg and dx_legacy:
+            logger.info("DirectX legacy OK (registry + legacy DLLs detected)")
+        else:
+            logger.info(f"DirectX check: registry_present={dx_reg} legacy_dlls_present={dx_legacy} -> installing DirectX websetup...")
+            install_directx_web(logger)
+
+            if has_directx_legacy():
+                logger.info("DirectX legacy OK (post-install)")
+            else:
+                logger.info("DirectX legacy still not detected after install. No reinstall loop. Check %WINDIR%\\Logs\\DirectX.log if needed.")
 
     # ---------------------------------------------------------------------
     # First Install / Update Validate
@@ -1810,6 +1871,9 @@ class ServerManagerApp:
                 self.logger.info("Warning: Not running as Administrator. Installs may fail.")
 
             self._ensure_dependencies_first_install(self.logger)
+
+            # Certificates (requested: restore old behavior)
+            install_asa_certificates(self.logger)
 
             steamcmd_exe = ensure_steamcmd(Path(self.cfg.steamcmd_dir), self.logger)
             steamcmd_update_server(steamcmd_exe, Path(self.cfg.server_dir), self.logger, validate=False)
@@ -1884,11 +1948,8 @@ class ServerManagerApp:
             for line in p.stdout:
                 if self._stop_log_reader.is_set():
                     break
-
-                # Reduce noisy analytics chatter (user-facing UX)
                 if "GameAnalytics" in line or "Couldn't resolve host name" in line:
                     continue
-
                 self.logger.info(line.rstrip())
         except Exception as e:
             self.logger.info(f"Log reader stopped: {e}")
@@ -1906,6 +1967,7 @@ class ServerManagerApp:
             raise RuntimeError("RCON disabled in config.")
         if not (self.cfg.admin_password or "").strip():
             raise RuntimeError("Admin password is empty.")
+
         start = time.time()
         last_err: Optional[Exception] = None
         while time.time() - start < retry_window_sec:
@@ -1916,6 +1978,7 @@ class ServerManagerApp:
             except Exception as e:
                 last_err = e
                 time.sleep(0.5)
+
         raise RuntimeError(str(last_err) if last_err else "RCON failed")
 
     def send_rcon(self) -> None:
@@ -2015,7 +2078,6 @@ class ServerManagerApp:
                 backup_server(self.cfg, self.app_base, self.logger)
 
             restore_baseline_to_server(self.app_base, Path(self.cfg.server_dir), self.logger)
-
             self.root.after(0, self._refresh_buttons)
 
         self._run_task("Stop Server", job)
@@ -2175,7 +2237,7 @@ class ServerManagerApp:
         self._ini_loaded_target = "gus"
         src, _ = self._ini_target_paths()
         self._ini_doc = read_ini(src)
-        self.lbl_ini_target.configure(text=f"GameUserSettings.ini (editing staged copy if present)")
+        self.lbl_ini_target.configure(text="GameUserSettings.ini (editing staged copy if present)")
         self._ini_refresh_tree()
 
     def load_game_ini(self) -> None:
@@ -2186,7 +2248,7 @@ class ServerManagerApp:
         self._ini_loaded_target = "game"
         _, src = self._ini_target_paths()
         self._ini_doc = read_ini(src)
-        self.lbl_ini_target.configure(text=f"Game.ini (editing staged copy if present)")
+        self.lbl_ini_target.configure(text="Game.ini (editing staged copy if present)")
         self._ini_refresh_tree()
 
     def open_loaded_ini(self) -> None:
@@ -2296,7 +2358,7 @@ class ServerManagerApp:
 
         w = self.canvas_ticks.winfo_width()
         h = int(self.canvas_ticks["height"])
-        n = 11  # 10 segments
+        n = 11
         for i in range(n):
             x = int((w - 2) * (i / (n - 1))) + 1
             tick_h = 10 if i in (0, n - 1) or i == (n - 1) // 2 else 6
@@ -2307,7 +2369,6 @@ class ServerManagerApp:
         key = self.var_ini_key.get().strip()
         if not section or not key:
             return
-        # Keep entry synced and auto-apply
         cur = self.var_ini_value.get().strip()
         t = self._detect_value_type(cur)
         if t == "int":
@@ -2334,7 +2395,6 @@ class ServerManagerApp:
         if not section or not key:
             return
 
-        val = ""
         if self.cmb_ini_bool.winfo_ismapped():
             val = self.var_ini_bool.get().strip()
         else:
@@ -2352,17 +2412,6 @@ class ServerManagerApp:
 
         self._ini_refresh_tree()
         self._set_status("INI staged")
-
-    # ---------------------------------------------------------------------
-    # Misc
-    # ---------------------------------------------------------------------
-    def backup_now(self) -> None:
-        def job() -> None:
-            self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
-            backup_server(self.cfg, self.app_base, self.logger)
-
-        self._run_task("Backup", job)
 
 
 # =============================================================================
