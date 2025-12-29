@@ -1,70 +1,190 @@
-# ARK Ascended Server Manager
+# ARK: Survival Ascended Server Manager (Windows)
+
 [![Discord](https://img.shields.io/badge/Discord-%237289DA.svg?logo=discord&logoColor=white)](https://discord.gg/7tvmSdXcEH)
+![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![License](https://img.shields.io/github/license/Ch4r0ne/ARK-Ascended-Server-Manager)
+![Stars](https://img.shields.io/github/stars/Ch4r0ne/ARK-Ascended-Server-Manager?style=flat)
+![Issues](https://img.shields.io/github/issues/Ch4r0ne/ARK-Ascended-Server-Manager)
+![Last Commit](https://img.shields.io/github/last-commit/Ch4r0ne/ARK-Ascended-Server-Manager)
 
-ARK Ascended Server Manager simplifies the management of ARK Survival Ascended Servers with ease and efficiency.
+**GUI manager** for **ARK: Survival Ascended Dedicated Servers** on **Windows**.  
+Built for **safe operations**, **reliable RCON**, and a clean **staging-based configuration workflow**.
 
-## Key Features
+> Not affiliated with Studio Wildcard / Snail Games.
 
-- **Simple Configuration**: Adjust server settings effortlessly through an intuitive interface.
-- **Seamless Installation**: Automated setup using SteamCMD for hassle-free server deployment.
-- **Automatic Updates**: Keep your server current with seamless patching via SteamCMD.
-- **One-Click Launch**: Start your server with a single click.
-- **RCON Integration**: Send commands via the console.
-- **Configuration Editing**: Modify 'Game.ini' and 'GameUserSettings.ini' easily.
+## Preview
 
-## Compatibility
+![Server Tab](Preview/ASA_Server_Manager_Preview_2.png)
 
-Compatible with Windows Server 2022/2019.
+---
 
-![Preview](Preview/ASA_Server_Manager_Preview_1.png)
+## Highlights
 
+### First Install Automation (Admin recommended)
+- Installs prerequisites:
+  - Visual C++ 2015–2022 Redistributable (x64)
+  - DirectX Legacy Runtime (web installer)
+  - Amazon certificates (helps on hardened hosts / strict TLS chains)
+- Installs SteamCMD automatically
+- Downloads / updates the ASA dedicated server via SteamCMD
 
+### Safe Start / Stop
+- Deterministic start-line generation (map, ports, session, mods, BattleEye, RCON, cluster, advanced flags)
+- Safe stop sequence:
+  - `SaveWorld` → `DoExit`
 
-## Automatic Backup Tool
+### Reliable RCON
+- Uses Python `rcon` (Source RCON) when available
+- Built-in RCON fallback (same UI, same behavior)
+- Saved commands + fast execution
+- Output written into the shared Console
 
-Enhance management with our dedicated [Backup Tool](https://github.com/Ch4r0ne/Backup-Tool).
+### INI Editor (Staging Workflow)
+- User-friendly editing:
+  - booleans via `True/False` selector
+  - numeric values via slider + tick marks
+  - changes are staged automatically (debounced)
+- On **Start**: staged configs are applied into the server directory
+- On **Stop (Safe)**: baseline is restored into the server directory (staged edits remain for next start)
 
-## Port Forwarding
+### Advanced Start Arguments (Grouped)
+- Cluster configuration
+- Dino modes (mutual exclusive)
+- Logs
+- Mechanics / performance flags
 
-Configure port forwarding:
+### Backups + Retention
+- Optional backup on stop
+- Zip retention policy
+- Optional “include configs” mode
 
-- Port: 27015 (UDP) - Default: 7777
+### Auto Update & Restart
+- Interval-based update/validate + safe restart
+- Skips triggers while the app is busy
+
+---
+
+## Installation
+
+### Option A: EXE (recommended)
+1. Download the latest release from **Releases**
+2. Run `ARK-ASA-Manager.exe`
+3. Click **First Install** once (**run as Administrator** for full functionality)
+4. Configure server settings
+5. Click **Start Server**
+
+### Option B: Build EXE
 ```powershell
-New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27015 -Protocol UDP -Action Allow
+pyinstaller --noconfirm --clean --onefile --windowed `
+  --name "ARK-ASA-Manager" `
+  --icon ".\assets\app.ico" `
+  --collect-all rcon `
+  ".\ARK-Ascended-Server-Manager.py"
 ```
-- QueryPort: 27016 (TCP) - Not in use
+---
+
+## Usage
+
+### Recommended flow
+1. **First Install**
+2. Configure **Paths**, **Server Settings**, **Operations**
+3. Optional: adjust **Advanced Start Args**
+4. Optional: adjust INI values in **INI Editor**
+5. **Start Server**
+6. Use **RCON** for admin commands and operations
+7. **Stop Server (Safe)** (optional backup + baseline restore)
+
+### Multi-instance hosting
+- Use unique ports per instance (game/query/RCON)
+- Use `AltSaveDirectoryName` per instance to keep saves separated
+- If you run clusters, keep cluster IDs consistent across instances that should transfer
+
+---
+
+## Configuration Model
+
+### Staging + Baseline
+This manager separates *edit time* and *runtime*:
+
+- **Baseline**
+  - created once from the server’s original INIs
+  - used to restore a known-good state on stop
+- **Staging**
+  - your edits are written here
+  - applied to the server folder on start
+
+This avoids “half-edited live INIs” and allows safe rollback without losing your intended changes.
+
+### Backups + Retention
+- Backups are stored as zip files (Saved folder + optional Config folder)
+- Retention deletes older zips beyond the configured limit
+
+---
+
+## Networking
+
+Typical defaults (depends on your config):
+- **Game Port (UDP):** `7777`
+- **Query Port (UDP):** `27015`
+- **RCON Port (TCP):** `27020` (only if RCON enabled)
+
+### Router / NAT (Port Forwarding)
+Forward ports to the server host:
+- `7777/UDP`
+- `27015/UDP`
+- `27020/TCP` (optional, only for RCON)
+
+### Windows Firewall (PowerShell)
 ```powershell
-New-NetFirewallRule -DisplayName "ASA Server" -Direction Inbound -LocalPort 27016 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "ARK ASA Game Port (UDP 7777)"   -Direction Inbound -Action Allow -Protocol UDP -LocalPort 7777
+New-NetFirewallRule -DisplayName "ARK ASA Query Port (UDP 27015)" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 27015
 ```
+
+### Validate listening ports
+```powershell
+netstat -aon | findstr :7777
+netstat -aon | findstr :27015
+netstat -aon | findstr :27020
+```
+
+---
+
+## Security
+
+### RCON
+Do **not** expose RCON to the public internet.
+
+Use one of:
+- LAN-only access
+- VPN
+- strict firewall allow-listing (admin IPs only)
+
+### Credentials
+- Keep your Admin/Join password private
+- Avoid committing `config.json` to public
+
+---
 
 ## Troubleshooting
 
-### Check Admin Rights
-It is crucial to execute the script with administrative privileges during the initial installation. For subsequent updates and server startups, this requirement is not necessary. Failure to execute the script with admin rights may result in the absence of necessary certificates required for server listening.
+### “First Install” fails
+Run the EXE **as Administrator**. Installers and certificate store writes may fail without elevation.
 
-### Verify Port and Certificates
-If using a separate `netstat -aon` command, ensure that the desired port, e.g., 7777, is listening on your ASA Server. Match the PID in Task Manager with the ID shown in the netstat output, for example, "UDP 0.0.0.0:7777 *:* 17546". Activate the filter by Name in Task Manager to locate the PID associated with the process. Only when this port is actively listening will your server be listed. Otherwise, there may be an issue with the certificates.
+---
 
-# Parameter Overview
+## Dependencies
 
-For a comprehensive overview of parameters, please refer to the [Server Configuration](https://ark.wiki.gg/wiki/Server_configuration).
+The manager may download or use:
+- SteamCMD: https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip
+- VC++ Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe
+- DirectX Runtime Web Installer: https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe
+- Amazon certificates:
+  - https://www.amazontrust.com/repository/AmazonRootCA1.cer
+  - https://crt.r2m02.amazontrust.com/r2m02.cer
+- Python RCON: https://pypi.org/project/rcon/
 
-## Manual Setup Guide
+---
 
-For detailed setup instructions, please visit the [Dedicated Server Setup](https://ark.wiki.gg/wiki/Dedicated_server_setup#Windows_Server_editions_and_crossplay_with_Epic_players) page.
-
-If you prefer not to use the manager, an automatic installation script for the certificate is available: [UnrealEngine_Dedicated_Server_Install_CA](https://github.com/Ch4r0ne/UnrealEngine_Dedicated_Server_Install_CA#UnrealEngine_Dedicated_Server_Install_CA)
-
-## 🐞 Found a Bug? Help Us Improve!
-Welcome to the preview release of ARK-Ascended-Server-Manager! Your feedback is invaluable as we refine the application. If you encounter any bugs or unexpected behavior, please report them on GitHub. Your reports guide us toward a seamless user experience. Thank you for your support!
-
-## External Resources Used in this Script
-- **mcrcon for RCON**: [https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-windows-x86-64.zip](https://github.com/Tiiffi/mcrcon/releases/download/v0.7.2/mcrcon-0.7.2-windows-x86-64.zip)
-- **AutoUpdateJob (if selected)**: [https://raw.githubusercontent.com/Ch4r0ne/ARK-Ascended-Server-Manager/main/AutoUpdateJob.ps1](https://raw.githubusercontent.com/Ch4r0ne/ARK-Ascended-Server-Manager/main/AutoUpdateJob.ps1)
-- **Backup Tool (if selected)**: [https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi](https://github.com/Ch4r0ne/Backup-Tool/releases/download/1.0.3/BackupJobSchedulerGUI.msi)
-- **SteamCMD**: [https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip](https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip)
-- **Visual C++ Redistributable**: [https://aka.ms/vs/17/release/vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-- **DirectX Runtime**: [https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe](https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe)
-- **Amazon Certificate**:
-  - Root CA1: [https://www.amazontrust.com/repository/AmazonRootCA1.cer](https://www.amazontrust.com/repository/AmazonRootCA1.cer)
-  - Root CA r2m02: [http://crt.r2m02.amazontrust.com/r2m02.cer](http://crt.r2m02.amazontrust.com/r2m02.cer)
+## Star History
+[![Star History Chart](https://api.star-history.com/svg?repos=Ch4r0ne/ARK-Ascended-Server-Manager&type=Date)](https://star-history.com/#Ch4r0ne/ARK-Ascended-Server-Manager&Date)
