@@ -1,6 +1,4 @@
-# ark_asa_manager.py
 # ARK: Survival Ascended Dedicated Server Manager (Windows)
-# Python 3.10+ | Tkinter GUI | Stdlib + optional: pip install rcon
 
 from __future__ import annotations
 
