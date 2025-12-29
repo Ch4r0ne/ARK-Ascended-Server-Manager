@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import ctypes
+import copy
+import hashlib
 import json
 import logging
 import os
 import shlex
 import shutil
 import socket
+import ssl
 import struct
 import subprocess
 import sys
 import threading
 import time
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.request import Request, urlopen
@@ -41,8 +44,6 @@ APP_ID = 2430930  # ASA Dedicated Server AppID
 STEAMCMD_ZIP_URL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
 VC_REDIST_X64_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 DXWEBSETUP_URL = "https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
-
-# Certificates (requested)
 AMAZON_ROOT_CA1_URL: str = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
 AMAZON_R2M02_URL: str = "https://crt.r2m02.amazontrust.com/r2m02.cer"
 
@@ -161,11 +162,61 @@ def now_ts() -> str:
     return time.strftime("%Y-%m-%d_%H-%M-%S")
 
 
-def safe_int(s: str, default: int) -> int:
+def safe_int(s: Any, default: int) -> int:
     try:
         return int(str(s).strip())
     except Exception:
         return default
+
+
+def safe_bool(v: Any, default: bool = False) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        t = v.strip().lower()
+        if t in ("1", "true", "yes", "y", "on"):
+            return True
+        if t in ("0", "false", "no", "n", "off"):
+            return False
+    return default
+
+
+def file_sha256(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 256), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    ensure_dir(path.parent)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding=encoding, newline="") as f:
+        f.write(text)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            pass
+    os.replace(str(tmp), str(path))
+
+
+def atomic_write_bytes(path: Path, data: bytes) -> None:
+    ensure_dir(path.parent)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            pass
+    os.replace(str(tmp), str(path))
 
 
 def open_folder(path: Path) -> None:
@@ -176,39 +227,49 @@ def open_folder(path: Path) -> None:
         pass
 
 
-def open_file(path: Path) -> None:
-    if not path.exists():
-        return
+def open_in_explorer(path: Path, select_file: bool = True) -> None:
+    """
+    Windows: open Explorer and select file (best UX).
+    Fallback: open folder/file via os.startfile.
+    """
     try:
-        os.startfile(str(path))
+        if os.name == "nt":
+            if select_file and path.exists() and path.is_file():
+                subprocess.Popen(["explorer.exe", "/select,", str(path)])
+                return
+            # Open folder
+            target = path if path.is_dir() else path.parent
+            ensure_dir(target)
+            subprocess.Popen(["explorer.exe", str(target)])
+            return
+
+        # non-Windows fallback
+        if path.is_dir():
+            open_folder(path)
+        else:
+            if path.exists():
+                os.startfile(str(path))  # type: ignore[attr-defined]
     except Exception:
         pass
 
 
-def download_file(url: str, dest: Path, logger: logging.Logger, timeout: int = DOWNLOAD_TIMEOUT_SEC) -> None:
-    ensure_dir(dest.parent)
-    logger.info(f"Downloading: {url}")
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urlopen(req, timeout=timeout) as r, open(dest, "wb") as f:
-        while True:
-            chunk = r.read(1024 * 256)
-            if not chunk:
-                break
-            f.write(chunk)
-    logger.info(f"Saved: {dest}")
+def _find_powershell() -> Optional[str]:
+    """
+    Returns an available PowerShell executable name (powershell.exe or pwsh).
+    We keep this conservative to stay compatible with standard Windows installs.
+    """
+    if os.name != "nt":
+        return None
 
-
-def download_file_with_certutil_fallback(url: str, dest: Path, logger: logging.Logger) -> None:
-    try:
-        download_file(url, dest, logger)
-        return
-    except Exception as e:
-        logger.info(f"Download failed via urllib: {e} -> fallback to certutil urlcache.")
-    ensure_dir(dest.parent)
-    cmd = ["certutil", "-urlcache", "-split", "-f", url, str(dest)]
-    code = run_and_stream(cmd, logger)
-    if code != 0 or not dest.exists():
-        raise RuntimeError(f"Failed to download via certutil (exit={code}): {url}")
+    candidates = ["powershell.exe", "powershell", "pwsh.exe", "pwsh"]
+    for c in candidates:
+        try:
+            p = subprocess.run(["where", c], capture_output=True, text=True)
+            if p.returncode == 0:
+                return c
+        except Exception:
+            continue
+    return "powershell.exe"
 
 
 def run_and_stream(cmd: List[str], logger: logging.Logger, cwd: Optional[Path] = None) -> int:
@@ -228,13 +289,119 @@ def run_and_stream(cmd: List[str], logger: logging.Logger, cwd: Optional[Path] =
     return p.wait()
 
 
+def run_and_stream_collect(cmd: List[str], logger: logging.Logger, cwd: Optional[Path] = None) -> Tuple[int, str]:
+    logger.info(" ".join(cmd))
+    p = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        universal_newlines=True,
+    )
+    assert p.stdout is not None
+    lines: List[str] = []
+    for line in p.stdout:
+        s = line.rstrip()
+        lines.append(s)
+        logger.info(s)
+    code = p.wait()
+    return code, "\n".join(lines)
+
+
+def server_key_from_dir(server_dir: Path) -> str:
+    return str(server_dir).replace(":", "").replace("\\", "_").replace("/", "_")
+
+
+# =============================================================================
+# DOWNLOAD
+# =============================================================================
+
+def _urllib_download_ssl(url: str, dest: Path, logger: logging.Logger, timeout: int = DOWNLOAD_TIMEOUT_SEC) -> None:
+    ensure_dir(dest.parent)
+    logger.info(f"Downloading: {url}")
+
+    ctx = ssl.create_default_context()
+    try:
+        import certifi  # type: ignore
+        ctx.load_verify_locations(cafile=certifi.where())
+    except Exception:
+        pass
+
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(req, timeout=timeout, context=ctx) as r:
+        data = r.read()
+    if not data:
+        raise RuntimeError("Empty download response")
+    atomic_write_bytes(dest, data)
+    logger.info(f"Saved: {dest}")
+
+
+def _bits_download(url: str, dest: Path, logger: logging.Logger) -> None:
+    if os.name != "nt":
+        raise RuntimeError("BITS download is only supported on Windows.")
+
+    ps_exe = _find_powershell()
+    if not ps_exe:
+        raise RuntimeError("PowerShell not found; cannot use BITS download.")
+
+    ensure_dir(dest.parent)
+
+    ps = (
+        "Import-Module BitsTransfer -ErrorAction Stop; "
+        f"Start-BitsTransfer -Source '{url}' -Destination '{str(dest)}' -Priority Foreground -ErrorAction Stop"
+    )
+    cmd = [ps_exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps]
+    code = run_and_stream(cmd, logger)
+    if code != 0 or not dest.exists() or dest.stat().st_size == 0:
+        raise RuntimeError(f"BITS download failed (exit={code}): {url}")
+
+    logger.info(f"Saved: {dest}")
+
+
+def download_file_with_certutil_fallback(url: str, dest: Path, logger: logging.Logger) -> None:
+    """
+    Legacy function name kept for compatibility.
+    New behavior:
+      - Windows: try BITS first (enterprise-safe), then urllib SSL.
+      - Non-Windows: urllib SSL only.
+    """
+    last_err: Optional[Exception] = None
+
+    if os.name == "nt":
+        try:
+            _bits_download(url, dest, logger)
+            return
+        except Exception as e:
+            last_err = e
+            logger.info(f"BITS download failed: {e} -> fallback to urllib/ssl.")
+
+    try:
+        _urllib_download_ssl(url, dest, logger)
+        return
+    except Exception as e:
+        last_err = e
+        logger.info(f"Download failed via urllib/ssl: {e}")
+
+    if os.name == "nt":
+        try:
+            logger.info("Retrying via BITS as last resort...")
+            _bits_download(url, dest, logger)
+            return
+        except Exception as e:
+            last_err = e
+
+    raise RuntimeError(f"Failed to download: {url} -> {last_err}")
+
+
 # =============================================================================
 # CONFIG
 # =============================================================================
 
 @dataclass
 class AppConfig:
-    schema_version: int = 4
+    schema_version: int = 5
 
     steamcmd_dir: str = DEFAULT_STEAMCMD_DIR
     server_dir: str = DEFAULT_SERVER_DIR
@@ -267,6 +434,9 @@ class AppConfig:
 
     auto_update_restart: bool = False
     auto_update_interval_min: int = 360
+
+    # certificate install
+    install_optional_certificates: bool = True
 
     # RCON UX
     rcon_saved_commands: List[str] = field(default_factory=lambda: [
@@ -323,33 +493,99 @@ class AppConfig:
         self.mods = ",".join(items)
 
 
+@dataclass
+class ConfigLoadResult:
+    cfg: AppConfig
+    migrated: bool
+    warnings: List[str]
+
+
 class ConfigStore:
+    """
+    - Defaults + JSON overlay (typed)
+    - Keeps unknown keys for forward compatibility
+    - Atomic writes
+    - Optional migration (schema_version bump / missing keys)
+    """
+
     def __init__(self, path: Path):
         self.path = path
+        self._extra: Dict[str, Any] = {}
 
-    def load(self) -> AppConfig:
+    def load(self) -> ConfigLoadResult:
         cfg = AppConfig()
+        migrated = False
+        warnings: List[str] = []
+
         if not self.path.exists():
-            return cfg
+            migrated = True  # first-run: create file later
+            return ConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
+
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:
-            return cfg
+            raw = self.path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError("Config root is not a JSON object")
+        except Exception as e:
+            # quarantine corrupt config
+            try:
+                bad = self.path.with_name(f"config.corrupt.{now_ts()}.json")
+                shutil.copy2(self.path, bad)
+                warnings.append(f"Config was corrupt -> copied to: {bad}")
+            except Exception:
+                warnings.append("Config was corrupt -> could not copy quarantine file")
+            migrated = True
+            return ConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
 
-        for k, v in data.items():
-            if hasattr(cfg, k):
-                try:
-                    setattr(cfg, k, v)
-                except Exception:
-                    pass
+        known = {f.name: f for f in fields(AppConfig)}
+        self._extra = {k: v for k, v in data.items() if k not in known}
 
+        # overlay known fields with type safety
+        for name, fdef in known.items():
+            if name not in data:
+                continue
+            v = data.get(name)
+            try:
+                cur = getattr(cfg, name)
+                if isinstance(cur, bool):
+                    setattr(cfg, name, safe_bool(v, cur))
+                elif isinstance(cur, int):
+                    setattr(cfg, name, safe_int(v, cur))
+                elif isinstance(cur, list):
+                    setattr(cfg, name, v if isinstance(v, list) else cur)
+                else:
+                    setattr(cfg, name, v if isinstance(v, type(cur)) else str(v))
+            except Exception:
+                pass
+
+        # normalize list field
         if not isinstance(cfg.rcon_saved_commands, list):
             cfg.rcon_saved_commands = ["SaveWorld", "DoExit", "ListPlayers", "DestroyWildDinos"]
-        return cfg
+
+        # schema migration
+        current_schema = AppConfig().schema_version
+        if safe_int(getattr(cfg, "schema_version", 0), 0) != current_schema:
+            cfg.schema_version = current_schema
+            migrated = True
+
+        # missing keys = migrated (ensures new fields get written to disk)
+        for name in known.keys():
+            if name not in data:
+                migrated = True
+                break
+
+        return ConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
 
     def save(self, cfg: AppConfig) -> None:
         ensure_dir(self.path.parent)
-        self.path.write_text(json.dumps(asdict(cfg), indent=2), encoding="utf-8")
+        base = asdict(cfg)
+
+        # forward-compat: keep unknown keys
+        for k, v in self._extra.items():
+            if k not in base:
+                base[k] = v
+
+        atomic_write_text(self.path, json.dumps(base, indent=2), encoding="utf-8")
 
 
 # =============================================================================
@@ -425,6 +661,18 @@ def install_directx_web(logger: logging.Logger) -> None:
 
 
 def install_asa_certificates(logger: logging.Logger) -> None:
+    """
+    - Downloads AmazonRootCA1 + r2m02 and imports them into Windows cert store.
+    - Implemented via PowerShell Import-Certificate (NOT certutil) to avoid Defender/ASR download heuristics.
+    """
+    if os.name != "nt":
+        logger.info("Certificate install skipped: only supported on Windows.")
+        return
+
+    ps_exe = _find_powershell()
+    if not ps_exe:
+        raise RuntimeError("PowerShell not found; cannot import certificates.")
+
     temp = Path(os.environ.get("TEMP", str(Path.home() / "AppData/Local/Temp")))
     root_path = temp / "AmazonRootCA1.cer"
     r2m02_path = temp / "r2m02.cer"
@@ -432,22 +680,28 @@ def install_asa_certificates(logger: logging.Logger) -> None:
     download_file_with_certutil_fallback(AMAZON_ROOT_CA1_URL, root_path, logger)
     download_file_with_certutil_fallback(AMAZON_R2M02_URL, r2m02_path, logger)
 
-    user_flag: List[str] = []
-    if not is_admin():
-        user_flag = ["-user"]
-        logger.info("Certificate install: non-admin -> CurrentUser store (-user).")
+    if is_admin():
+        root_store = r"Cert:\LocalMachine\Root"
+        ca_store = r"Cert:\LocalMachine\CA"
+        logger.info("Certificate import: admin -> LocalMachine store.")
     else:
-        logger.info("Certificate install: admin -> LocalMachine store.")
+        root_store = r"Cert:\CurrentUser\Root"
+        ca_store = r"Cert:\CurrentUser\CA"
+        logger.info("Certificate import: non-admin -> CurrentUser store.")
 
-    def add(store: str, path: Path) -> None:
-        cmd = ["certutil", *user_flag, "-addstore", "-f", store, str(path)]
+    def import_cert(cer_path: Path, store: str) -> None:
+        ps = (
+            f"Import-Certificate -FilePath '{str(cer_path)}' -CertStoreLocation '{store}' "
+            "| Out-Null"
+        )
+        cmd = [ps_exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps]
         code = run_and_stream(cmd, logger)
         if code != 0:
-            raise RuntimeError(f"certutil failed (store={store}, file={path.name}), exit code={code}")
+            raise RuntimeError(f"Import-Certificate failed (exit={code}) for {cer_path.name} -> {store}")
 
     logger.info("Installing certificates: AmazonRootCA1 -> Root, r2m02 -> CA")
-    add("Root", root_path)
-    add("CA", r2m02_path)
+    import_cert(root_path, root_store)
+    import_cert(r2m02_path, ca_store)
     logger.info("Certificates installed/updated successfully.")
 
 
@@ -463,6 +717,10 @@ def ensure_steamcmd(steamcmd_dir: Path, logger: logging.Logger) -> Path:
     ]
     for c in candidates:
         if c.exists():
+            try:
+                run_and_stream_collect([str(c), "+quit"], logger, cwd=c.parent)
+            except Exception as e:
+                logger.info(f"SteamCMD bootstrap warning (ignored): {e}")
             return c
 
     zip_path = steamcmd_dir / "steamcmd.zip"
@@ -476,6 +734,10 @@ def ensure_steamcmd(steamcmd_dir: Path, logger: logging.Logger) -> Path:
 
     for c in candidates:
         if c.exists():
+            try:
+                run_and_stream_collect([str(c), "+quit"], logger, cwd=c.parent)
+            except Exception as e:
+                logger.info(f"SteamCMD bootstrap warning (ignored): {e}")
             return c
 
     raise FileNotFoundError(f"steamcmd.exe not found after extraction in: {steamcmd_dir}")
@@ -483,22 +745,32 @@ def ensure_steamcmd(steamcmd_dir: Path, logger: logging.Logger) -> Path:
 
 def steamcmd_update_server(steamcmd_exe: Path, server_dir: Path, logger: logging.Logger, validate: bool) -> None:
     ensure_dir(server_dir)
-    cmd = [
+
+    base_cmd = [
         str(steamcmd_exe),
+        "+@ShutdownOnFailedCommand", "1",
+        "+@NoPromptForPassword", "1",
         "+force_install_dir", str(server_dir),
         "+login", "anonymous",
         "+app_update", str(APP_ID),
     ]
     if validate:
-        cmd.append("validate")
-    cmd.append("+quit")
-    code = run_and_stream(cmd, logger, cwd=steamcmd_exe.parent)
+        base_cmd.append("validate")
+    base_cmd.append("+quit")
+
+    code, out = run_and_stream_collect(base_cmd, logger, cwd=steamcmd_exe.parent)
+
+    if code == 7 or "Missing configuration" in out:
+        logger.info("SteamCMD returned code 7 / Missing configuration (first-run bootstrap). Retrying once...")
+        time.sleep(2)
+        code, out = run_and_stream_collect(base_cmd, logger, cwd=steamcmd_exe.parent)
+
     if code != 0:
         raise RuntimeError(f"SteamCMD exited with code {code}")
 
 
 # =============================================================================
-# INI (order-preserving)
+# INI (order-preserving, duplicate-key aware)
 # =============================================================================
 
 @dataclass
@@ -536,30 +808,87 @@ class IniDocument:
             out.append(IniLine(kind="other", raw=raw, section=cur_section))
         return IniDocument(out)
 
-    def get(self) -> Dict[str, Dict[str, str]]:
+    def is_effectively_empty(self) -> bool:
+        for l in self.lines:
+            if l.kind == "kv":
+                return False
+            if l.kind == "section":
+                # sections alone are still "empty enough" (common corruption case is almost empty file)
+                continue
+        # if only comments/whitespace, it's empty
+        return True
+
+    def kv_entries_by_section(self) -> Dict[str, List[Tuple[int, str, str]]]:
+        """
+        Returns section -> list of (line_index, key, value) in original order.
+        Duplicate keys are preserved.
+        """
+        out: Dict[str, List[Tuple[int, str, str]]] = {}
+        for idx, line in enumerate(self.lines):
+            if line.kind == "kv":
+                out.setdefault(line.section, []).append((idx, line.key, line.value))
+        return out
+
+    def get_last_value_map(self) -> Dict[str, Dict[str, str]]:
+        """
+        Convenience map (last-value wins). Only used for diff/merge.
+        """
         data: Dict[str, Dict[str, str]] = {}
         for line in self.lines:
             if line.kind == "kv":
                 data.setdefault(line.section, {})[line.key] = line.value
         return data
 
+    def ensure_section(self, section: str) -> None:
+        section = section.strip()
+        if not section:
+            return
+        if any(l.kind == "section" and l.section == section for l in self.lines):
+            return
+
+        if self.lines and not self.lines[-1].raw.endswith("\n"):
+            self.lines[-1].raw += "\n"
+        self.lines.append(IniLine(kind="other", raw="\n"))
+        self.lines.append(IniLine(kind="section", raw=f"[{section}]\n", section=section))
+
     def set(self, section: str, key: str, value: str) -> None:
+        """
+        Set key in section:
+        - If key exists (any occurrence), update the FIRST occurrence (stable, conservative).
+        - Else, append as new kv line at end of section.
+        """
         section = section.strip()
         key = key.strip()
         value = str(value)
 
-        if not any(l.kind == "section" and l.section == section for l in self.lines):
-            if self.lines and not self.lines[-1].raw.endswith("\n"):
-                self.lines[-1].raw += "\n"
-            self.lines.append(IniLine(kind="other", raw="\n"))
-            self.lines.append(IniLine(kind="section", raw=f"[{section}]\n", section=section))
+        if not section or not key:
+            return
+
+        self.ensure_section(section)
 
         for l in self.lines:
             if l.kind == "kv" and l.section == section and l.key.lower() == key.lower():
+                nl = "\r\n" if l.raw.endswith("\r\n") else ("\n" if l.raw.endswith("\n") else "\n")
                 l.key = key
                 l.value = value
-                l.raw = f"{key}={value}\n"
+                l.raw = f"{key}={value}{nl}"
                 return
+
+        self.append_kv(section, key, value)
+
+    def append_kv(self, section: str, key: str, value: str) -> int:
+        """
+        Always append a new kv line (duplicate keys allowed).
+        Returns inserted line index.
+        """
+        section = section.strip()
+        key = key.strip()
+        value = str(value)
+
+        if not section or not key:
+            return -1
+
+        self.ensure_section(section)
 
         insert_at = None
         for i, l in enumerate(self.lines):
@@ -576,6 +905,24 @@ class IniDocument:
             insert_at = len(self.lines)
 
         self.lines.insert(insert_at, IniLine(kind="kv", raw=f"{key}={value}\n", section=section, key=key, value=value))
+        return insert_at
+
+    def update_value_at(self, line_index: int, value: str) -> None:
+        if not (0 <= line_index < len(self.lines)):
+            return
+        l = self.lines[line_index]
+        if l.kind != "kv":
+            return
+        nl = "\r\n" if l.raw.endswith("\r\n") else ("\n" if l.raw.endswith("\n") else "\n")
+        l.value = str(value)
+        l.raw = f"{l.key}={l.value}{nl}"
+
+    def delete_at(self, line_index: int) -> None:
+        if not (0 <= line_index < len(self.lines)):
+            return
+        if self.lines[line_index].kind != "kv":
+            return
+        self.lines.pop(line_index)
 
     def to_text(self) -> str:
         return "".join(l.raw for l in self.lines)
@@ -588,8 +935,172 @@ def read_ini(path: Path) -> IniDocument:
 
 
 def write_ini(path: Path, doc: IniDocument) -> None:
-    ensure_dir(path.parent)
-    path.write_text(doc.to_text(), encoding="utf-8")
+    atomic_write_text(path, doc.to_text(), encoding="utf-8")
+
+
+def three_way_merge_ini(base: IniDocument, staged: IniDocument, upstream: IniDocument) -> IniDocument:
+    """
+    3-way merge on last-value maps (safe for ARK style):
+    - compute changes from base -> staged
+    - apply those changes onto upstream
+    NOTE: deletions are not propagated (conservative, avoids accidental removal).
+    """
+    base_map = base.get_last_value_map()
+    staged_map = staged.get_last_value_map()
+    up_doc = upstream  # mutate upstream doc
+
+    for sec, kvs in staged_map.items():
+        for key, staged_val in kvs.items():
+            base_val = base_map.get(sec, {}).get(key, None)
+            if base_val is None or staged_val != base_val:
+                up_doc.set(sec, key, staged_val)
+
+    return up_doc
+
+
+@dataclass
+class IniStagePaths:
+    target_name: str  # "gus" | "game"
+    live: Path
+    baseline: Path
+    stage: Path
+    stage_base: Path
+    stage_meta: Path
+
+
+def ini_stage_paths(app_base: Path, server_dir: Path, target: str) -> IniStagePaths:
+    key = server_key_from_dir(server_dir)
+
+    live_gus = server_dir / GAMEUSERSETTINGS_REL
+    live_game = server_dir / GAME_INI_REL
+
+    baseline_root = app_base / BASELINE_DIR_NAME / key
+    baseline_gus = baseline_root / "GameUserSettings.ini"
+    baseline_game = baseline_root / "Game.ini"
+
+    stage_gus, stage_game = staging_paths(app_base, server_dir)
+
+    if target == "gus":
+        stage = stage_gus
+        live = live_gus
+        baseline = baseline_gus
+        stage_base = stage_gus.with_suffix(".base.ini")
+        stage_meta = stage_gus.with_suffix(".meta.json")
+    else:
+        stage = stage_game
+        live = live_game
+        baseline = baseline_game
+        stage_base = stage_game.with_suffix(".base.ini")
+        stage_meta = stage_game.with_suffix(".meta.json")
+
+    return IniStagePaths(
+        target_name=target,
+        live=live,
+        baseline=baseline,
+        stage=stage,
+        stage_base=stage_base,
+        stage_meta=stage_meta,
+    )
+
+
+def ensure_ini_staging_synced(paths: IniStagePaths, server_running: bool, logger: Optional[logging.Logger] = None) -> None:
+    """
+    Guarantees:
+    - stage exists and is not trivially empty/corrupt
+    - stage includes latest upstream keys (via 3-way merge)
+    Upstream source decision:
+    - if server running: use baseline (if exists) else live
+    - if server not running: use live (if exists) else baseline
+    """
+    ensure_dir(paths.stage.parent)
+
+    def log(msg: str) -> None:
+        if logger:
+            logger.info(msg)
+
+    upstream = None
+    if server_running:
+        upstream = paths.baseline if paths.baseline.exists() else paths.live
+    else:
+        upstream = paths.live if paths.live.exists() else paths.baseline
+
+    upstream_exists = upstream.exists() if upstream is not None else False
+
+    if not paths.stage.exists():
+        if upstream_exists:
+            shutil.copy2(upstream, paths.stage)
+            shutil.copy2(upstream, paths.stage_base)
+            log(f"INI staging created from upstream: {paths.stage.name}")
+        else:
+            write_ini(paths.stage, IniDocument.parse(""))
+            write_ini(paths.stage_base, IniDocument.parse(""))
+            log(f"INI staging created empty: {paths.stage.name}")
+
+        meta = {
+            "created": now_ts(),
+            "upstream_path": str(upstream) if upstream else "",
+            "upstream_hash": file_sha256(upstream) if upstream else "",
+        }
+        try:
+            atomic_write_text(paths.stage_meta, json.dumps(meta, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return
+
+    # repair corrupt/empty stage (your exact bug)
+    try:
+        stage_doc = read_ini(paths.stage)
+        if paths.stage.stat().st_size == 0 or stage_doc.is_effectively_empty():
+            if upstream_exists:
+                shutil.copy2(upstream, paths.stage)
+                shutil.copy2(upstream, paths.stage_base)
+                log(f"INI staging repaired from upstream: {paths.stage.name}")
+            else:
+                write_ini(paths.stage, IniDocument.parse(""))
+                write_ini(paths.stage_base, IniDocument.parse(""))
+                log(f"INI staging repaired as empty: {paths.stage.name}")
+            return
+    except Exception:
+        # if anything goes sideways, rebuild from upstream
+        if upstream_exists:
+            shutil.copy2(upstream, paths.stage)
+            shutil.copy2(upstream, paths.stage_base)
+            log(f"INI staging force-repaired from upstream: {paths.stage.name}")
+        return
+
+    # ensure stage_base exists
+    if not paths.stage_base.exists():
+        if upstream_exists:
+            shutil.copy2(upstream, paths.stage_base)
+            log(f"INI stage base created from upstream: {paths.stage_base.name}")
+        else:
+            shutil.copy2(paths.stage, paths.stage_base)
+            log(f"INI stage base created from stage: {paths.stage_base.name}")
+
+    # merge if upstream changed since last base snapshot
+    if upstream_exists:
+        upstream_hash = file_sha256(upstream)
+        base_hash = file_sha256(paths.stage_base)
+        if upstream_hash and base_hash and upstream_hash != base_hash:
+            base_doc = read_ini(paths.stage_base)
+            staged_doc = read_ini(paths.stage)
+            upstream_doc = read_ini(upstream)
+            merged = three_way_merge_ini(base_doc, staged_doc, upstream_doc)
+            write_ini(paths.stage, merged)
+            shutil.copy2(upstream, paths.stage_base)
+
+            meta = {
+                "last_merge": now_ts(),
+                "upstream_path": str(upstream),
+                "upstream_hash": upstream_hash,
+                "base_hash_before": base_hash,
+            }
+            try:
+                atomic_write_text(paths.stage_meta, json.dumps(meta, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+            log(f"INI staging merged with upstream changes: {paths.stage.name}")
 
 
 # =============================================================================
@@ -845,23 +1356,31 @@ def build_server_command(cfg: AppConfig) -> List[str]:
 # STAGING / BASELINE
 # =============================================================================
 
-def ensure_baseline(app_base: Path, server_dir: Path, logger: logging.Logger) -> Path:
+def ensure_baseline(app_base: Path, server_dir: Path, logger: logging.Logger, refresh: bool = True) -> Path:
+    """
+    Enterprise fix:
+    - Baseline must reflect the *current* live INIs right before staging is applied.
+    - refresh=True overwrites baseline if live exists (safe & correct for Stop Safe restore).
+    """
     baseline_root = app_base / BASELINE_DIR_NAME
     ensure_dir(baseline_root)
 
-    key = str(server_dir).replace(":", "").replace("\\", "_").replace("/", "_")
+    key = server_key_from_dir(server_dir)
     base = baseline_root / key
     ensure_dir(base)
 
     src_gus = server_dir / GAMEUSERSETTINGS_REL
     src_game = server_dir / GAME_INI_REL
 
-    if src_gus.exists() and not (base / "GameUserSettings.ini").exists():
-        shutil.copy2(src_gus, base / "GameUserSettings.ini")
-        logger.info("Baseline created: GameUserSettings.ini")
-    if src_game.exists() and not (base / "Game.ini").exists():
-        shutil.copy2(src_game, base / "Game.ini")
-        logger.info("Baseline created: Game.ini")
+    dst_gus = base / "GameUserSettings.ini"
+    dst_game = base / "Game.ini"
+
+    if src_gus.exists() and (refresh or not dst_gus.exists()):
+        shutil.copy2(src_gus, dst_gus)
+        logger.info("Baseline updated: GameUserSettings.ini")
+    if src_game.exists() and (refresh or not dst_game.exists()):
+        shutil.copy2(src_game, dst_game)
+        logger.info("Baseline updated: Game.ini")
 
     return base
 
@@ -869,7 +1388,7 @@ def ensure_baseline(app_base: Path, server_dir: Path, logger: logging.Logger) ->
 def staging_paths(app_base: Path, server_dir: Path) -> Tuple[Path, Path]:
     staging_root = app_base / STAGING_DIR_NAME
     ensure_dir(staging_root)
-    key = str(server_dir).replace(":", "").replace("\\", "_").replace("/", "_")
+    key = server_key_from_dir(server_dir)
     root = staging_root / key
     ensure_dir(root)
     return root / "GameUserSettings.ini", root / "Game.ini"
@@ -892,9 +1411,9 @@ def apply_staging_to_server(app_base: Path, server_dir: Path, logger: logging.Lo
 
 
 def restore_baseline_to_server(app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
-    base = ensure_baseline(app_base, server_dir, logger)
-    src_gus = base / "GameUserSettings.ini"
-    src_game = base / "Game.ini"
+    base_root = app_base / BASELINE_DIR_NAME / server_key_from_dir(server_dir)
+    src_gus = base_root / "GameUserSettings.ini"
+    src_game = base_root / "Game.ini"
 
     dest_gus = server_dir / GAMEUSERSETTINGS_REL
     dest_game = server_dir / GAME_INI_REL
@@ -913,10 +1432,11 @@ def restore_baseline_to_server(app_base: Path, server_dir: Path, logger: logging
 def ensure_required_server_settings(cfg: AppConfig, app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
     ensure_dir((server_dir / GAMEUSERSETTINGS_REL).parent)
 
-    stage_gus, _ = staging_paths(app_base, server_dir)
-    src = stage_gus if stage_gus.exists() else (server_dir / GAMEUSERSETTINGS_REL)
+    # guarantee staged INI is healthy + synced
+    paths = ini_stage_paths(app_base, server_dir, "gus")
+    ensure_ini_staging_synced(paths, server_running=False, logger=logger)
 
-    doc = read_ini(src)
+    doc = read_ini(paths.stage)
     sec = "ServerSettings"
 
     doc.set(sec, "ServerAdminPassword", (cfg.admin_password or "").strip())
@@ -928,7 +1448,7 @@ def ensure_required_server_settings(cfg: AppConfig, app_base: Path, server_dir: 
     else:
         doc.set(sec, "RCONEnabled", "False")
 
-    write_ini(stage_gus, doc)
+    write_ini(paths.stage, doc)
     logger.info("Staged ServerSettings into GameUserSettings.ini (Admin/Join/RCON).")
 
 
@@ -1047,8 +1567,12 @@ class ServerManagerApp:
         self.app_base = self.static_app_base()
         self.config_path = self.app_base / "config.json"
         self.log_dir = self.app_base / LOG_DIR_NAME
+
         self.store = ConfigStore(self.config_path)
-        self.cfg = self.store.load()
+        load_res = self.store.load()
+        self.cfg = load_res.cfg
+        self._config_migrated = load_res.migrated
+        self._config_warnings = load_res.warnings
 
         self._busy = False
         self._busy_lock = threading.Lock()
@@ -1065,16 +1589,29 @@ class ServerManagerApp:
 
         self._rcon_factory = get_rcon_client_factory()
 
+        # INI editor state
         self._ini_loaded_target: Optional[str] = None  # "gus" | "game"
         self._ini_doc: Optional[IniDocument] = None
-        self._ini_items_index: Dict[str, Tuple[str, str]] = {}
+        self._ini_items_index: Dict[str, int] = {}  # tree iid -> IniDocument line_index
         self._ini_apply_after_id: Optional[str] = None
+        self._ini_selected_line_idx: Optional[int] = None
+        self._ini_paths_current: Optional[IniStagePaths] = None
 
         self._init_vars()
         self._build_layout()
 
         self.logger = build_logger(self.log_dir, self.txt_log)
         self._write_banner()
+
+        # log config warnings + write migrated config once
+        for w in self._config_warnings:
+            self.logger.info(f"[CONFIG] {w}")
+        if self._config_migrated:
+            try:
+                self.store.save(self.cfg)
+                self.logger.info("[CONFIG] Migrated/initialized config saved.")
+            except Exception as e:
+                self.logger.info(f"[CONFIG] Save after migration failed: {e}")
 
         self._autosave_guard = True
         self._apply_cfg_to_vars(self.cfg)
@@ -1121,6 +1658,8 @@ class ServerManagerApp:
         self.var_auto_update_restart = tk.BooleanVar(master=m)
         self.var_auto_update_interval_min = tk.StringVar(master=m)
 
+        self.var_install_optional_certificates = tk.BooleanVar(master=m)
+
         self.var_status = tk.StringVar(master=m)
 
         self.var_cluster_enable = tk.BooleanVar(master=m)
@@ -1152,12 +1691,18 @@ class ServerManagerApp:
         self.var_rcon_cmd = tk.StringVar(master=m)
         self.var_rcon_saved = tk.StringVar(master=m)
 
+        # INI editor vars
         self.var_ini_filter = tk.StringVar(master=m)
         self.var_ini_key = tk.StringVar(master=m)
         self.var_ini_section = tk.StringVar(master=m)
         self.var_ini_value = tk.StringVar(master=m)
         self.var_ini_bool = tk.StringVar(master=m)
         self.var_ini_scale = tk.DoubleVar(master=m)
+
+        # INI "add line" vars
+        self.var_ini_add_section = tk.StringVar(master=m)
+        self.var_ini_add_key = tk.StringVar(master=m)
+        self.var_ini_add_value = tk.StringVar(master=m)
 
     # ---------------------------------------------------------------------
     # Layout
@@ -1207,6 +1752,7 @@ class ServerManagerApp:
 
         ttk.Label(lf_paths, text="Server Install Directory").grid(row=0, column=3, sticky="w", padx=(18, 0))
         ttk.Entry(lf_paths, textvariable=self.var_server_dir).grid(row=0, column=4, sticky="ew", padx=6)
+        ttk.Entry(lf_paths)  # no-op placeholder removed intentionally
         ttk.Button(lf_paths, text="Browse", command=self._browse_server_dir).grid(row=0, column=5)
 
         lf_server = ttk.LabelFrame(self.tab_server, text="Server Settings", padding=10)
@@ -1293,6 +1839,13 @@ class ServerManagerApp:
         ).grid(row=12, column=0, sticky="w")
         ttk.Label(lf_ops, text="Interval (minutes)").grid(row=13, column=0, sticky="w")
         ttk.Entry(lf_ops, textvariable=self.var_auto_update_interval_min, validate="key", validatecommand=vcmd).grid(row=13, column=1, sticky="ew", padx=6)
+
+        ttk.Separator(lf_ops).grid(row=14, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Checkbutton(
+            lf_ops,
+            text="Install certificates",
+            variable=self.var_install_optional_certificates
+        ).grid(row=15, column=0, sticky="w")
 
         actions = ttk.Frame(self.tab_server, padding=(5, 10))
         actions.grid(row=2, column=0, columnspan=2, sticky="ew")
@@ -1413,7 +1966,7 @@ class ServerManagerApp:
         # ---------------- INI Editor tab ----------------
         self.tab_ini.columnconfigure(0, weight=2)
         self.tab_ini.columnconfigure(1, weight=1)
-        self.tab_ini.rowconfigure(1, weight=1)
+        self.tab_ini.rowconfigure(2, weight=1)
 
         ini_top = ttk.Frame(self.tab_ini)
         ini_top.grid(row=0, column=0, columnspan=2, sticky="ew")
@@ -1425,7 +1978,8 @@ class ServerManagerApp:
 
         ttk.Button(ini_top, text="Load GameUserSettings.ini", command=self.load_gameusersettings).grid(row=0, column=2, padx=4)
         ttk.Button(ini_top, text="Load Game.ini", command=self.load_game_ini).grid(row=0, column=3, padx=4)
-        ttk.Button(ini_top, text="Open Staged File", command=self.open_loaded_ini).grid(row=0, column=4, padx=4)
+        ttk.Button(ini_top, text="Open Live + Staging", command=self.open_loaded_ini).grid(row=0, column=4, padx=4)
+        ttk.Button(ini_top, text="Resync from Upstream", command=self._ini_resync_from_upstream).grid(row=0, column=5, padx=4)
 
         ttk.Label(ini_top, text="Filter").grid(row=1, column=0, sticky="w", pady=(6, 0))
         ent_filter = ttk.Entry(ini_top, textvariable=self.var_ini_filter)
@@ -1433,7 +1987,7 @@ class ServerManagerApp:
         ent_filter.bind("<KeyRelease>", lambda e: self._ini_refresh_tree())
 
         tree_frame = ttk.Frame(self.tab_ini)
-        tree_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
+        tree_frame.grid(row=2, column=0, sticky="nsew", padx=(0, 10))
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
@@ -1449,8 +2003,8 @@ class ServerManagerApp:
 
         self.tree_ini.bind("<<TreeviewSelect>>", lambda e: self._ini_on_select())
 
-        editor = ttk.LabelFrame(self.tab_ini, text="Edit", padding=10)
-        editor.grid(row=1, column=1, sticky="nsew")
+        editor = ttk.LabelFrame(self.tab_ini, text="Edit Selected Line", padding=10)
+        editor.grid(row=2, column=1, sticky="nsew")
         editor.columnconfigure(1, weight=1)
 
         ttk.Label(editor, text="Section").grid(row=0, column=0, sticky="w")
@@ -1473,15 +2027,39 @@ class ServerManagerApp:
         self.canvas_ticks = tk.Canvas(editor, height=14, highlightthickness=0)
         self.canvas_ticks.grid(row=4, column=0, columnspan=2, sticky="ew")
 
+        btn_line = ttk.Frame(editor)
+        btn_line.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Button(btn_line, text="Delete Selected Line", command=self._ini_delete_selected).grid(row=0, column=0, sticky="w")
+
         ttk.Label(
             editor,
-            text="Edits are staged. They are applied into the server folder on Start.\n"
-                 "On Stop (Safe) the baseline is restored into the server folder.",
+            text="Edits are staged and auto-saved.\n"
+                 "On Start: staging is copied into the server folder.\n"
+                 "On Stop (Safe): baseline is restored into the server folder.",
             wraplength=360
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
         self.ent_ini_value.bind("<KeyRelease>", lambda e: self._ini_schedule_apply())
         self.cmb_ini_bool.bind("<<ComboboxSelected>>", lambda e: self._ini_schedule_apply())
+
+        add_box = ttk.LabelFrame(self.tab_ini, text="Add / Append Line", padding=10)
+        add_box.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        add_box.columnconfigure(1, weight=1)
+        add_box.columnconfigure(3, weight=1)
+
+        ttk.Label(add_box, text="Section").grid(row=0, column=0, sticky="w")
+        ttk.Entry(add_box, textvariable=self.var_ini_add_section).grid(row=0, column=1, sticky="ew", padx=6)
+
+        ttk.Label(add_box, text="Key").grid(row=0, column=2, sticky="w")
+        ttk.Entry(add_box, textvariable=self.var_ini_add_key).grid(row=0, column=3, sticky="ew", padx=6)
+
+        ttk.Label(add_box, text="Value").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(add_box, textvariable=self.var_ini_add_value).grid(row=1, column=1, columnspan=3, sticky="ew", padx=6, pady=(6, 0))
+
+        add_btns = ttk.Frame(add_box)
+        add_btns.grid(row=2, column=1, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Button(add_btns, text="Append Line (duplicate keys allowed)", command=self._ini_append_line).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(add_btns, text="Set/Replace First Occurrence", command=self._ini_set_line).grid(row=0, column=1)
 
         # ---------------- Console (bottom) ----------------
         bottom.columnconfigure(0, weight=1)
@@ -1560,6 +2138,8 @@ class ServerManagerApp:
         self.var_auto_update_restart.set(cfg.auto_update_restart)
         self.var_auto_update_interval_min.set(str(cfg.auto_update_interval_min))
 
+        self.var_install_optional_certificates.set(bool(cfg.install_optional_certificates))
+
         self.var_cluster_enable.set(cfg.cluster_enable)
         self.var_cluster_id.set(cfg.cluster_id)
         self.var_cluster_custom_path_enable.set(cfg.cluster_custom_path_enable)
@@ -1589,7 +2169,13 @@ class ServerManagerApp:
         self._rcon_refresh_saved(cfg)
 
     def _collect_vars_to_cfg(self) -> AppConfig:
-        cfg = AppConfig()
+        """
+        Enterprise fix:
+        - Start from current self.cfg (deepcopy) so newly added config fields
+          (or fields not yet bound to UI) are not lost on autosave.
+        """
+        cfg = copy.deepcopy(self.cfg) if isinstance(self.cfg, AppConfig) else AppConfig()
+        cfg.schema_version = AppConfig().schema_version
 
         cfg.steamcmd_dir = self.var_steamcmd_dir.get().strip() or DEFAULT_STEAMCMD_DIR
         cfg.server_dir = self.var_server_dir.get().strip() or DEFAULT_SERVER_DIR
@@ -1622,6 +2208,8 @@ class ServerManagerApp:
         cfg.auto_update_restart = bool(self.var_auto_update_restart.get())
         cfg.auto_update_interval_min = safe_int(self.var_auto_update_interval_min.get(), 360) or 360
 
+        cfg.install_optional_certificates = bool(self.var_install_optional_certificates.get())
+
         cfg.cluster_enable = bool(self.var_cluster_enable.get())
         cfg.cluster_id = self.var_cluster_id.get().strip()
         cfg.cluster_custom_path_enable = bool(self.var_cluster_custom_path_enable.get())
@@ -1648,8 +2236,7 @@ class ServerManagerApp:
         cfg.mech_stasiskeepcontrollers = bool(self.var_m_stasiskeepcontrollers.get())
         cfg.mech_ignoredupeditems = bool(self.var_m_ignoredupeditems.get())
 
-        cfg.rcon_saved_commands = self.cfg.rcon_saved_commands[:] if isinstance(self.cfg.rcon_saved_commands, list) else []
-        if not cfg.rcon_saved_commands:
+        if not isinstance(cfg.rcon_saved_commands, list) or not cfg.rcon_saved_commands:
             cfg.rcon_saved_commands = ["SaveWorld", "DoExit", "ListPlayers", "DestroyWildDinos"]
 
         self._validate_cfg(cfg)
@@ -1688,6 +2275,7 @@ class ServerManagerApp:
             self.var_enable_rcon, self.var_rcon_host, self.var_rcon_port,
             self.var_backup_on_stop, self.var_backup_dir, self.var_backup_retention, self.var_backup_include_configs,
             self.var_auto_update_restart, self.var_auto_update_interval_min,
+            self.var_install_optional_certificates,
             self.var_cluster_enable, self.var_cluster_id, self.var_cluster_custom_path_enable, self.var_cluster_dir_override,
             self.var_no_transfer_from_filtering, self.var_alt_save_directory_name,
             self.var_dino_mode,
@@ -1870,8 +2458,10 @@ class ServerManagerApp:
 
             self._ensure_dependencies_first_install(self.logger)
 
-            # Certificates (requested: restore old behavior)
-            install_asa_certificates(self.logger)
+            if bool(self.cfg.install_optional_certificates):
+                install_asa_certificates(self.logger)
+            else:
+                self.logger.info("Optional certificate install disabled (default).")
 
             steamcmd_exe = ensure_steamcmd(Path(self.cfg.steamcmd_dir), self.logger)
             steamcmd_update_server(steamcmd_exe, Path(self.cfg.server_dir), self.logger, validate=False)
@@ -1896,7 +2486,10 @@ class ServerManagerApp:
     # ---------------------------------------------------------------------
     def _stage_required_configs_for_start(self) -> None:
         server_dir = Path(self.cfg.server_dir)
-        ensure_baseline(self.app_base, server_dir, self.logger)
+
+        # baseline MUST be refreshed right before applying staging
+        ensure_baseline(self.app_base, server_dir, self.logger, refresh=True)
+
         ensure_required_server_settings(self.cfg, self.app_base, server_dir, self.logger)
 
     def start_server(self) -> None:
@@ -2217,66 +2810,113 @@ class ServerManagerApp:
             self.root.after(0, self.update_and_restart_safe)
 
     # ---------------------------------------------------------------------
-    # INI Editor
+    # INI Editor (Enterprise)
     # ---------------------------------------------------------------------
-    def _ini_target_paths(self) -> Tuple[Path, Path]:
+    def _ini_load_target(self, target: str) -> None:
+        self.cfg = self._collect_vars_to_cfg()
+        self.store.save(self.cfg)
+
         server_dir = Path(self.cfg.server_dir)
-        stage_gus, stage_game = staging_paths(self.app_base, server_dir)
-        live_gus = server_dir / GAMEUSERSETTINGS_REL
-        live_game = server_dir / GAME_INI_REL
-        return (stage_gus if stage_gus.exists() else live_gus,
-                stage_game if stage_game.exists() else live_game)
+
+        # Ensure baseline exists (but do not refresh here; editor should be non-destructive)
+        ensure_dir(self.app_base / BASELINE_DIR_NAME / server_key_from_dir(server_dir))
+
+        paths = ini_stage_paths(self.app_base, server_dir, target)
+
+        # Critical: staging must sync from upstream (baseline if server running)
+        ensure_ini_staging_synced(paths, server_running=self._is_server_running(), logger=self.logger)
+
+        self._ini_loaded_target = target
+        self._ini_paths_current = paths
+        self._ini_doc = read_ini(paths.stage)
+
+        if target == "gus":
+            self.lbl_ini_target.configure(text=f"Editing STAGED GameUserSettings.ini  |  {paths.stage}")
+        else:
+            self.lbl_ini_target.configure(text=f"Editing STAGED Game.ini  |  {paths.stage}")
+
+        # prefill add-section with current selection (or common default)
+        if not self.var_ini_add_section.get().strip():
+            self.var_ini_add_section.set("ServerSettings")
+
+        self._ini_refresh_tree()
 
     def load_gameusersettings(self) -> None:
-        self.cfg = self._collect_vars_to_cfg()
-        self.store.save(self.cfg)
-        server_dir = Path(self.cfg.server_dir)
-        ensure_baseline(self.app_base, server_dir, self.logger)
-        self._ini_loaded_target = "gus"
-        src, _ = self._ini_target_paths()
-        self._ini_doc = read_ini(src)
-        self.lbl_ini_target.configure(text="GameUserSettings.ini (editing staged copy if present)")
-        self._ini_refresh_tree()
+        self._ini_load_target("gus")
 
     def load_game_ini(self) -> None:
-        self.cfg = self._collect_vars_to_cfg()
-        self.store.save(self.cfg)
-        server_dir = Path(self.cfg.server_dir)
-        ensure_baseline(self.app_base, server_dir, self.logger)
-        self._ini_loaded_target = "game"
-        _, src = self._ini_target_paths()
-        self._ini_doc = read_ini(src)
-        self.lbl_ini_target.configure(text="Game.ini (editing staged copy if present)")
-        self._ini_refresh_tree()
+        self._ini_load_target("game")
 
     def open_loaded_ini(self) -> None:
-        if not self._ini_loaded_target:
+        """
+        Requirement:
+        - Open Explorer for BOTH Live and Staging locations (file selected).
+        """
+        if not self._ini_paths_current:
             return
-        src_gus, src_game = self._ini_target_paths()
-        open_file(src_gus if self._ini_loaded_target == "gus" else src_game)
+        paths = self._ini_paths_current
+        open_in_explorer(paths.stage, select_file=True)
+        open_in_explorer(paths.live, select_file=True)
+
+    def _ini_resync_from_upstream(self) -> None:
+        if not self._ini_paths_current:
+            return
+        ensure_ini_staging_synced(self._ini_paths_current, server_running=self._is_server_running(), logger=self.logger)
+        self._ini_doc = read_ini(self._ini_paths_current.stage)
+        self._ini_refresh_tree()
+        self._set_status("INI resynced")
 
     def _ini_refresh_tree(self) -> None:
         self.tree_ini.delete(*self.tree_ini.get_children())
         self._ini_items_index.clear()
+
         if not self._ini_doc:
             return
 
-        data = self._ini_doc.get()
+        kv_by_section = self._ini_doc.kv_entries_by_section()
         filt = (self.var_ini_filter.get() or "").strip().lower()
 
-        for section in sorted(data.keys(), key=lambda s: s.lower()):
-            sec_iid = self.tree_ini.insert("", "end", text=f"[{section}]", values=("",))
-            keys = data[section]
-            inserted_any = False
-            for key in sorted(keys.keys(), key=lambda s: s.lower()):
-                val = keys[key]
-                if filt and (filt not in section.lower() and filt not in key.lower() and filt not in str(val).lower()):
+        idx_to_iid: Dict[int, str] = {}
+        selected_idx = self._ini_selected_line_idx
+
+        # preserve insertion order
+        for section, entries in kv_by_section.items():
+            # filter entries
+            visible: List[Tuple[int, str, str]] = []
+            for idx, key, val in entries:
+                hay = f"{section}\n{key}\n{val}".lower()
+                if filt and filt not in hay:
                     continue
-                iid = self.tree_ini.insert(sec_iid, "end", text=key, values=(val,))
-                self._ini_items_index[iid] = (section, key)
-                inserted_any = True
-            if inserted_any:
-                self.tree_ini.item(sec_iid, open=True)
+                visible.append((idx, key, val))
+
+            if not visible:
+                continue
+
+            sec_iid = self.tree_ini.insert("", "end", text=f"[{section}]", values=("",))
+            self.tree_ini.item(sec_iid, open=True)
+
+            # count duplicates for display
+            counts: Dict[str, int] = {}
+            totals: Dict[str, int] = {}
+            for _, k, _ in entries:
+                totals[k.lower()] = totals.get(k.lower(), 0) + 1
+
+            for idx, key, val in visible:
+                k_l = key.lower()
+                counts[k_l] = counts.get(k_l, 0) + 1
+                label = key if totals.get(k_l, 0) <= 1 else f"{key} [{counts[k_l]}]"
+                iid = self.tree_ini.insert(sec_iid, "end", text=label, values=(val,))
+                self._ini_items_index[iid] = idx
+                idx_to_iid[idx] = iid
+
+        # restore selection if possible
+        if selected_idx is not None and selected_idx in idx_to_iid:
+            iid = idx_to_iid[selected_idx]
+            try:
+                self.tree_ini.selection_set(iid)
+                self.tree_ini.see(iid)
+            except Exception:
+                pass
 
     def _ini_on_select(self) -> None:
         sel = self.tree_ini.selection()
@@ -2285,13 +2925,24 @@ class ServerManagerApp:
         iid = sel[0]
         if iid not in self._ini_items_index:
             return
-        section, key = self._ini_items_index[iid]
+        idx = self._ini_items_index[iid]
         assert self._ini_doc is not None
-        val = self._ini_doc.get().get(section, {}).get(key, "")
 
-        self.var_ini_section.set(section)
-        self.var_ini_key.set(key)
+        if not (0 <= idx < len(self._ini_doc.lines)):
+            return
+        line = self._ini_doc.lines[idx]
+        if line.kind != "kv":
+            return
 
+        self._ini_selected_line_idx = idx
+        self.var_ini_section.set(line.section)
+        self.var_ini_key.set(line.key)
+
+        # also prefill "add line" section with current section
+        if line.section.strip():
+            self.var_ini_add_section.set(line.section)
+
+        val = line.value
         t = self._detect_value_type(str(val))
         if t == "bool":
             self.ent_ini_value.grid_forget()
@@ -2363,9 +3014,7 @@ class ServerManagerApp:
             self.canvas_ticks.create_line(x, h, x, h - tick_h)
 
     def _ini_scale_changed(self, _=None) -> None:
-        section = self.var_ini_section.get().strip()
-        key = self.var_ini_key.get().strip()
-        if not section or not key:
+        if self._ini_selected_line_idx is None:
             return
         cur = self.var_ini_value.get().strip()
         t = self._detect_value_type(cur)
@@ -2385,12 +3034,9 @@ class ServerManagerApp:
 
     def _ini_apply_now(self) -> None:
         self._ini_apply_after_id = None
-        if not self._ini_doc or not self._ini_loaded_target:
+        if not self._ini_doc or not self._ini_loaded_target or not self._ini_paths_current:
             return
-
-        section = self.var_ini_section.get().strip()
-        key = self.var_ini_key.get().strip()
-        if not section or not key:
+        if self._ini_selected_line_idx is None:
             return
 
         if self.cmb_ini_bool.winfo_ismapped():
@@ -2398,18 +3044,65 @@ class ServerManagerApp:
         else:
             val = self.var_ini_value.get()
 
-        self._ini_doc.set(section, key, val)
-
-        server_dir = Path(self.cfg.server_dir)
-        stage_gus, stage_game = staging_paths(self.app_base, server_dir)
-
-        if self._ini_loaded_target == "gus":
-            write_ini(stage_gus, self._ini_doc)
-        else:
-            write_ini(stage_game, self._ini_doc)
+        self._ini_doc.update_value_at(self._ini_selected_line_idx, val)
+        write_ini(self._ini_paths_current.stage, self._ini_doc)
 
         self._ini_refresh_tree()
         self._set_status("INI staged")
+
+    def _ini_append_line(self) -> None:
+        if not self._ini_doc or not self._ini_paths_current:
+            return
+        sec = self.var_ini_add_section.get().strip()
+        key = self.var_ini_add_key.get().strip()
+        val = self.var_ini_add_value.get()
+
+        if not sec or not key:
+            messagebox.showerror("INI", "Section and Key are required.")
+            return
+
+        idx = self._ini_doc.append_kv(sec, key, val)
+        if idx < 0:
+            return
+
+        write_ini(self._ini_paths_current.stage, self._ini_doc)
+        self._ini_selected_line_idx = idx
+        self._ini_refresh_tree()
+        self._set_status("INI line appended")
+
+    def _ini_set_line(self) -> None:
+        if not self._ini_doc or not self._ini_paths_current:
+            return
+        sec = self.var_ini_add_section.get().strip()
+        key = self.var_ini_add_key.get().strip()
+        val = self.var_ini_add_value.get()
+
+        if not sec or not key:
+            messagebox.showerror("INI", "Section and Key are required.")
+            return
+
+        self._ini_doc.set(sec, key, val)
+        write_ini(self._ini_paths_current.stage, self._ini_doc)
+        self._ini_refresh_tree()
+        self._set_status("INI key set")
+
+    def _ini_delete_selected(self) -> None:
+        if not self._ini_doc or not self._ini_paths_current:
+            return
+        if self._ini_selected_line_idx is None:
+            return
+
+        idx = self._ini_selected_line_idx
+        self._ini_doc.delete_at(idx)
+        write_ini(self._ini_paths_current.stage, self._ini_doc)
+
+        self._ini_selected_line_idx = None
+        self.var_ini_section.set("")
+        self.var_ini_key.set("")
+        self.var_ini_value.set("")
+        self.var_ini_bool.set("")
+        self._ini_refresh_tree()
+        self._set_status("INI line deleted")
 
 
 # =============================================================================
