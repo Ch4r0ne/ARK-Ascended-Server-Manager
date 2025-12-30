@@ -1,20 +1,22 @@
 # ARK: Survival Ascended Dedicated Server Manager (Windows)
-
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import copy
 import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import socket
 import ssl
+import stat
 import struct
 import subprocess
-import sys
+import tempfile
 import threading
 import time
 import zipfile
@@ -32,6 +34,7 @@ try:
 except Exception:
     winreg = None
 
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # =============================================================================
 # GLOBALS
@@ -39,16 +42,19 @@ except Exception:
 
 APP_NAME = "ARK: Survival Ascended Server Manager"
 APP_USERMODEL_ID = "Ch4r0ne.ARKASAManager"
-APP_ID = 2430930  # ASA Dedicated Server AppID
+
+ARK_ASA_APP_ID = 2430930  # ASA Dedicated Server AppID
 
 STEAMCMD_ZIP_URL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
 VC_REDIST_X64_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 DXWEBSETUP_URL = "https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
-AMAZON_ROOT_CA1_URL: str = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
-AMAZON_R2M02_URL: str = "https://crt.r2m02.amazontrust.com/r2m02.cer"
+
+AMAZON_ROOT_CA1_URL = "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
+AMAZON_R2M02_URL = "https://crt.r2m02.amazontrust.com/r2m02.cer"
 
 DEFAULT_STEAMCMD_DIR = r"C:\GameServer\SteamCMD"
 DEFAULT_SERVER_DIR = r"C:\GameServer\ARK-Survival-Ascended-Server"
+
 DEFAULT_MAP = "TheIsland_WP"
 DEFAULT_SERVER_NAME = "default"
 DEFAULT_PORT = 7777
@@ -58,7 +64,7 @@ DEFAULT_MAX_PLAYERS = 70
 DEFAULT_RCON_HOST = "127.0.0.1"
 DEFAULT_RCON_PORT = 27020
 
-DOWNLOAD_TIMEOUT_SEC = 120
+DOWNLOAD_TIMEOUT_SEC = 180
 AUTOSAVE_DEBOUNCE_MS = 700
 INI_APPLY_DEBOUNCE_MS = 500
 
@@ -81,12 +87,8 @@ STAGING_DIR_NAME = "staging"
 BASELINE_DIR_NAME = "baseline"
 BACKUP_DIR_NAME = "backups"
 
-GAMEUSERSETTINGS_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\GameUserSettings.ini")
-GAME_INI_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\Game.ini")
-
 LOG_LEVEL = logging.INFO
 
-# DirectX legacy detection (requested: combine registry + legacy DLL presence)
 DIRECTX_LEGACY_DLLS = [
     "d3dx9_43.dll",
     "d3dx10_43.dll",
@@ -95,13 +97,15 @@ DIRECTX_LEGACY_DLLS = [
     "xinput1_3.dll",
 ]
 
+GAMEUSERSETTINGS_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\GameUserSettings.ini")
+GAME_INI_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\Game.ini")
 
 # =============================================================================
 # PATH / ICON HELPERS
 # =============================================================================
 
 def resource_path(relative: str) -> str:
-    base = getattr(sys, "_MEIPASS", None)
+    base = getattr(sys, "_MEIPASS", None)  # type: ignore[name-defined]
     if base:
         return str(Path(base) / relative)
     return str(Path(__file__).resolve().parent / relative)
@@ -116,13 +120,83 @@ def set_windows_appusermodel_id(app_id: str) -> None:
         pass
 
 
-def apply_window_icon(root: tk.Tk) -> None:
-    ico = resource_path(r"assets\app.ico")
+def _set_tk_window_icon_from_ico(root: tk.Tk, ico_path: str) -> None:
+    """
+    Ensures icon is applied for the actual window (WM_SETICON), not only Tk metadata.
+    This fixes cases where taskbar/window still shows generic icon.
+    """
+    if os.name != "nt":
+        return
+
     try:
-        root.iconbitmap(ico)
+        hwnd = root.winfo_id()
+        user32 = ctypes.windll.user32
+
+        WM_SETICON = 0x0080
+        ICON_SMALL = 0
+        ICON_BIG = 1
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x0010
+        LR_DEFAULTSIZE = 0x0040
+
+        hicon_small = user32.LoadImageW(None, ico_path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+        hicon_big = user32.LoadImageW(None, ico_path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE | LR_DEFAULTSIZE)
+
+        if hicon_small:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+        if hicon_big:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
     except Exception:
         pass
 
+
+def _set_tk_window_icon_from_exe(root: tk.Tk) -> None:
+    """
+    Fallback: Extract icon from the running EXE (PyInstaller onefile) and apply via WM_SETICON.
+    """
+    if os.name != "nt":
+        return
+    try:
+        hwnd = root.winfo_id()
+        user32 = ctypes.windll.user32
+        shell32 = ctypes.windll.shell32
+
+        WM_SETICON = 0x0080
+        ICON_SMALL = 0
+        ICON_BIG = 1
+
+        exe_path = os.path.abspath(sys.executable)  # type: ignore[name-defined]
+
+        large = (ctypes.c_void_p * 1)()
+        small = (ctypes.c_void_p * 1)()
+
+        n = shell32.ExtractIconExW(exe_path, 0, large, small, 1)
+        if n <= 0:
+            return
+
+        if small[0]:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small[0])
+        if large[0]:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, large[0])
+    except Exception:
+        pass
+
+
+def apply_window_icon(root: tk.Tk) -> None:
+    """
+    Priority:
+      1) assets/app.ico (when running from sources or bundled as data)
+      2) icon extracted from sys.executable (PyInstaller --icon)
+    """
+    ico = resource_path(r"assets\app.ico")
+    try:
+        if Path(ico).exists():
+            root.iconbitmap(ico)
+            _set_tk_window_icon_from_ico(root, ico)
+        else:
+            _set_tk_window_icon_from_exe(root)
+    except Exception:
+        _set_tk_window_icon_from_exe(root)
 
 # =============================================================================
 # LOW-LEVEL UTILITIES
@@ -141,17 +215,12 @@ def relaunch_as_admin() -> bool:
     if is_admin():
         return True
     try:
-        exe = sys.executable
-        params = " ".join([f'"{a}"' for a in sys.argv[1:]])
+        exe = sys.executable  # type: ignore[name-defined]
+        params = " ".join([f'"{a}"' for a in sys.argv[1:]])  # type: ignore[name-defined]
         rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
         return int(rc) > 32
     except Exception:
         return False
-
-
-def app_data_dir() -> Path:
-    base = os.getenv("APPDATA") or str(Path.home())
-    return Path(base) / APPDATA_DIR_NAME
 
 
 def ensure_dir(p: Path) -> None:
@@ -222,49 +291,32 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
 def open_folder(path: Path) -> None:
     ensure_dir(path)
     try:
-        os.startfile(str(path))
+        os.startfile(str(path))  # type: ignore[attr-defined]
     except Exception:
         pass
 
 
 def open_in_explorer(path: Path, select_file: bool = True) -> None:
-    """
-    Windows: open Explorer and select file (best UX).
-    Fallback: open folder/file via os.startfile.
-    """
     try:
         if os.name == "nt":
             if select_file and path.exists() and path.is_file():
-                subprocess.Popen(["explorer.exe", "/select,", str(path)])
+                subprocess.Popen(["explorer.exe", "/select,", str(path)], creationflags=CREATE_NO_WINDOW)
                 return
-            # Open folder
             target = path if path.is_dir() else path.parent
             ensure_dir(target)
-            subprocess.Popen(["explorer.exe", str(target)])
+            subprocess.Popen(["explorer.exe", str(target)], creationflags=CREATE_NO_WINDOW)
             return
-
-        # non-Windows fallback
-        if path.is_dir():
-            open_folder(path)
-        else:
-            if path.exists():
-                os.startfile(str(path))  # type: ignore[attr-defined]
     except Exception:
         pass
 
 
 def _find_powershell() -> Optional[str]:
-    """
-    Returns an available PowerShell executable name (powershell.exe or pwsh).
-    We keep this conservative to stay compatible with standard Windows installs.
-    """
     if os.name != "nt":
         return None
-
     candidates = ["powershell.exe", "powershell", "pwsh.exe", "pwsh"]
     for c in candidates:
         try:
-            p = subprocess.run(["where", c], capture_output=True, text=True)
+            p = subprocess.run(["where", c], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
             if p.returncode == 0:
                 return c
         except Exception:
@@ -272,53 +324,190 @@ def _find_powershell() -> Optional[str]:
     return "powershell.exe"
 
 
-def run_and_stream(cmd: List[str], logger: logging.Logger, cwd: Optional[Path] = None) -> int:
+def _is_writable_dir(p: Path) -> bool:
+    try:
+        ensure_dir(p)
+        t = p / f".write_test_{os.getpid()}_{int(time.time())}"
+        t.write_text("ok", encoding="utf-8")
+        t.unlink()
+        return True
+    except Exception:
+        return False
+
+
+def _portable_base_dir() -> Path:
+    try:
+        if getattr(sys, "frozen", False):  # type: ignore[name-defined]
+            return Path(sys.executable).resolve().parent  # type: ignore[name-defined]
+        return Path(__file__).resolve().parent
+    except Exception:
+        return Path.cwd()
+
+
+def _programdata_base() -> Optional[Path]:
+    if os.name != "nt":
+        return None
+    base = os.getenv("PROGRAMDATA") or r"C:\ProgramData"
+    return Path(base) / APPDATA_DIR_NAME
+
+
+def _appdata_base() -> Path:
+    base = os.getenv("APPDATA") or str(Path.home())
+    return Path(base) / APPDATA_DIR_NAME
+
+
+def resolve_storage_root() -> Path:
+    shared = _programdata_base()
+    user = _appdata_base()
+    portable = _portable_base_dir() / APPDATA_DIR_NAME
+
+    def cfg_exists(root: Path) -> bool:
+        return (root / "config.json").exists()
+
+    if shared and cfg_exists(shared):
+        if _is_writable_dir(shared):
+            return shared
+        try:
+            ensure_dir(user)
+            shutil.copy2(shared / "config.json", user / "config.json")
+        except Exception:
+            pass
+        return user
+
+    if cfg_exists(user):
+        return user
+    if cfg_exists(portable):
+        return portable
+
+    if shared and _is_writable_dir(shared):
+        return shared
+    if _is_writable_dir(user):
+        return user
+
+    ensure_dir(portable)
+    return portable
+
+
+def ensure_programdata_acl(shared_root: Path, logger: Optional[logging.Logger] = None) -> None:
+    if os.name != "nt" or not is_admin():
+        return
+    try:
+        ensure_dir(shared_root)
+        cmd = ["icacls", str(shared_root), "/grant", "Users:(OI)(CI)M", "/T", "/C"]
+        subprocess.run(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        if logger:
+            logger.info(f"Shared storage ACL ensured: {shared_root}")
+    except Exception as e:
+        if logger:
+            logger.info(f"Shared storage ACL could not be ensured: {e}")
+
+
+def run_quiet(cmd: List[str], cwd: Optional[Path] = None) -> Tuple[int, str]:
+    try:
+        p = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
+        return p.returncode, out.strip()
+    except Exception as e:
+        return 1, str(e)
+
+
+def stream_process_output(
+    cmd: List[str],
+    logger: logging.Logger,
+    cwd: Optional[Path] = None,
+    timeout_s: int = 0,
+    log_prefix: str = "",
+) -> Tuple[int, str]:
+    """
+    Streams stdout/stderr live into logger (GUI + file) AND returns full combined output.
+    Handles SteamCMD progress that uses carriage returns (\r).
+    """
     logger.info(" ".join(cmd))
     p = subprocess.Popen(
         cmd,
         cwd=str(cwd) if cwd else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True,
+        bufsize=0,
+        creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert p.stdout is not None
-    for line in p.stdout:
-        logger.info(line.rstrip())
-    return p.wait()
 
+    start = time.time()
+    buf = b""
+    collected: List[str] = []
+    last_line = ""
+    last_emit_t = 0.0
 
-def run_and_stream_collect(cmd: List[str], logger: logging.Logger, cwd: Optional[Path] = None) -> Tuple[int, str]:
-    logger.info(" ".join(cmd))
-    p = subprocess.Popen(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True,
-    )
-    assert p.stdout is not None
-    lines: List[str] = []
-    for line in p.stdout:
-        s = line.rstrip()
-        lines.append(s)
-        logger.info(s)
+    def emit(line: str) -> None:
+        nonlocal last_line, last_emit_t
+        s = line.strip("\r\n")
+        if not s:
+            return
+        # light throttle for rapidly updating progress lines
+        now = time.time()
+        if s == last_line and (now - last_emit_t) < 0.25:
+            return
+        last_line = s
+        last_emit_t = now
+        msg = f"{log_prefix}{s}" if log_prefix else s
+        collected.append(msg)
+        logger.info(msg)
+
+    while True:
+        if timeout_s > 0 and (time.time() - start) > timeout_s:
+            try:
+                p.kill()
+            except Exception:
+                pass
+            emit("Process timeout -> killed.")
+            break
+
+        chunk = p.stdout.read(4096)
+        if not chunk:
+            break
+
+        buf += chunk
+        # split on \n or \r to capture progress updates
+        while True:
+            m = re.search(br"[\r\n]", buf)
+            if not m:
+                break
+            idx = m.start()
+            line = buf[:idx]
+            sep = buf[idx:idx+1]
+            buf = buf[idx+1:]
+            try:
+                emit(line.decode("utf-8", errors="replace"))
+            except Exception:
+                pass
+            if sep == b"\r":
+                continue
+
+    if buf:
+        try:
+            emit(buf.decode("utf-8", errors="replace"))
+        except Exception:
+            pass
+
     code = p.wait()
-    return code, "\n".join(lines)
+    return code, "\n".join(collected)
 
 
 def server_key_from_dir(server_dir: Path) -> str:
     return str(server_dir).replace(":", "").replace("\\", "_").replace("/", "_")
 
-
 # =============================================================================
-# DOWNLOAD
+# DOWNLOAD (urllib only)
 # =============================================================================
 
-def _urllib_download_ssl(url: str, dest: Path, logger: logging.Logger, timeout: int = DOWNLOAD_TIMEOUT_SEC) -> None:
+def download_file(url: str, dest: Path, logger: logging.Logger, timeout: int = DOWNLOAD_TIMEOUT_SEC) -> None:
     ensure_dir(dest.parent)
     logger.info(f"Downloading: {url}")
 
@@ -329,71 +518,15 @@ def _urllib_download_ssl(url: str, dest: Path, logger: logging.Logger, timeout: 
     except Exception:
         pass
 
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    req = Request(url, headers={"User-Agent": "ARK-ASA-Manager/1.0"})
     with urlopen(req, timeout=timeout, context=ctx) as r:
         data = r.read()
+
     if not data:
         raise RuntimeError("Empty download response")
+
     atomic_write_bytes(dest, data)
     logger.info(f"Saved: {dest}")
-
-
-def _bits_download(url: str, dest: Path, logger: logging.Logger) -> None:
-    if os.name != "nt":
-        raise RuntimeError("BITS download is only supported on Windows.")
-
-    ps_exe = _find_powershell()
-    if not ps_exe:
-        raise RuntimeError("PowerShell not found; cannot use BITS download.")
-
-    ensure_dir(dest.parent)
-
-    ps = (
-        "Import-Module BitsTransfer -ErrorAction Stop; "
-        f"Start-BitsTransfer -Source '{url}' -Destination '{str(dest)}' -Priority Foreground -ErrorAction Stop"
-    )
-    cmd = [ps_exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps]
-    code = run_and_stream(cmd, logger)
-    if code != 0 or not dest.exists() or dest.stat().st_size == 0:
-        raise RuntimeError(f"BITS download failed (exit={code}): {url}")
-
-    logger.info(f"Saved: {dest}")
-
-
-def download_file_with_certutil_fallback(url: str, dest: Path, logger: logging.Logger) -> None:
-    """
-    Legacy function name kept for compatibility.
-    New behavior:
-      - Windows: try BITS first (enterprise-safe), then urllib SSL.
-      - Non-Windows: urllib SSL only.
-    """
-    last_err: Optional[Exception] = None
-
-    if os.name == "nt":
-        try:
-            _bits_download(url, dest, logger)
-            return
-        except Exception as e:
-            last_err = e
-            logger.info(f"BITS download failed: {e} -> fallback to urllib/ssl.")
-
-    try:
-        _urllib_download_ssl(url, dest, logger)
-        return
-    except Exception as e:
-        last_err = e
-        logger.info(f"Download failed via urllib/ssl: {e}")
-
-    if os.name == "nt":
-        try:
-            logger.info("Retrying via BITS as last resort...")
-            _bits_download(url, dest, logger)
-            return
-        except Exception as e:
-            last_err = e
-
-    raise RuntimeError(f"Failed to download: {url} -> {last_err}")
-
 
 # =============================================================================
 # CONFIG
@@ -401,7 +534,7 @@ def download_file_with_certutil_fallback(url: str, dest: Path, logger: logging.L
 
 @dataclass
 class AppConfig:
-    schema_version: int = 5
+    schema_version: int = 7
 
     steamcmd_dir: str = DEFAULT_STEAMCMD_DIR
     server_dir: str = DEFAULT_SERVER_DIR
@@ -412,6 +545,8 @@ class AppConfig:
     port: int = DEFAULT_PORT
     query_port: int = DEFAULT_QUERY_PORT
     max_players: int = DEFAULT_MAX_PLAYERS
+
+    server_platform: str = ""  # e.g. "PC+XSX+WINGDK" (moved to Advanced tab)
 
     join_password: str = ""
     admin_password: str = "AdminPassword"
@@ -428,17 +563,18 @@ class AppConfig:
     validate_on_update: bool = False
 
     backup_on_stop: bool = True
-    backup_dir: str = ""  # empty => appdata/backups
+    backup_dir: str = ""
     backup_retention: int = 20
     backup_include_configs: bool = False
 
     auto_update_restart: bool = False
     auto_update_interval_min: int = 360
 
-    # certificate install
-    install_optional_certificates: bool = True
+    install_optional_certificates: bool = True  # enforced True
 
-    # RCON UX
+    # Console noise filter (GUI only)
+    hide_gameanalytics_console_logs: bool = True
+
     rcon_saved_commands: List[str] = field(default_factory=lambda: [
         "SaveWorld",
         "DoExit",
@@ -454,7 +590,7 @@ class AppConfig:
     no_transfer_from_filtering: bool = False
     alt_save_directory_name: str = ""
 
-    dino_mode: str = ""  # "", "NoDinos", "NoDinosExceptForcedSpawn", ...
+    dino_mode: str = ""
 
     log_servergamelog: bool = False
     log_servergamelogincludetribelogs: bool = False
@@ -480,18 +616,6 @@ class AppConfig:
         parts = [p.strip() for p in raw.split(",") if p.strip()]
         return ",".join(parts)
 
-    def set_mods_from_text(self, text: str) -> None:
-        items: List[str] = []
-        for line in (text or "").replace("\r", "\n").split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            for tok in line.split(","):
-                t = tok.strip()
-                if t:
-                    items.append(t)
-        self.mods = ",".join(items)
-
 
 @dataclass
 class ConfigLoadResult:
@@ -501,13 +625,6 @@ class ConfigLoadResult:
 
 
 class ConfigStore:
-    """
-    - Defaults + JSON overlay (typed)
-    - Keeps unknown keys for forward compatibility
-    - Atomic writes
-    - Optional migration (schema_version bump / missing keys)
-    """
-
     def __init__(self, path: Path):
         self.path = path
         self._extra: Dict[str, Any] = {}
@@ -518,7 +635,7 @@ class ConfigStore:
         warnings: List[str] = []
 
         if not self.path.exists():
-            migrated = True  # first-run: create file later
+            migrated = True
             return ConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
 
         try:
@@ -527,7 +644,6 @@ class ConfigStore:
             if not isinstance(data, dict):
                 raise ValueError("Config root is not a JSON object")
         except Exception as e:
-            # quarantine corrupt config
             try:
                 bad = self.path.with_name(f"config.corrupt.{now_ts()}.json")
                 shutil.copy2(self.path, bad)
@@ -540,7 +656,6 @@ class ConfigStore:
         known = {f.name: f for f in fields(AppConfig)}
         self._extra = {k: v for k, v in data.items() if k not in known}
 
-        # overlay known fields with type safety
         for name, fdef in known.items():
             if name not in data:
                 continue
@@ -558,17 +673,16 @@ class ConfigStore:
             except Exception:
                 pass
 
-        # normalize list field
+        cfg.install_optional_certificates = True
+
         if not isinstance(cfg.rcon_saved_commands, list):
             cfg.rcon_saved_commands = ["SaveWorld", "DoExit", "ListPlayers", "DestroyWildDinos"]
 
-        # schema migration
         current_schema = AppConfig().schema_version
         if safe_int(getattr(cfg, "schema_version", 0), 0) != current_schema:
             cfg.schema_version = current_schema
             migrated = True
 
-        # missing keys = migrated (ensures new fields get written to disk)
         for name in known.keys():
             if name not in data:
                 migrated = True
@@ -579,14 +693,10 @@ class ConfigStore:
     def save(self, cfg: AppConfig) -> None:
         ensure_dir(self.path.parent)
         base = asdict(cfg)
-
-        # forward-compat: keep unknown keys
         for k, v in self._extra.items():
             if k not in base:
                 base[k] = v
-
         atomic_write_text(self.path, json.dumps(base, indent=2), encoding="utf-8")
-
 
 # =============================================================================
 # DEPENDENCIES
@@ -628,14 +738,11 @@ def directx_registry_present() -> bool:
         return False
 
 
-def has_directx_legacy(min_hits: int = 3) -> bool:
+def has_directx_legacy(min_hits: int = 1) -> bool:
     if os.name != "nt":
         return False
     windir = os.environ.get("WINDIR", r"C:\Windows")
-    candidates = [
-        Path(windir) / "System32",
-        Path(windir) / "SysWOW64",
-    ]
+    candidates = [Path(windir) / "System32", Path(windir) / "SysWOW64"]
     hits = 0
     for folder in candidates:
         for dll in DIRECTX_LEGACY_DLLS:
@@ -647,23 +754,24 @@ def has_directx_legacy(min_hits: int = 3) -> bool:
 def install_vcredist(logger: logging.Logger) -> None:
     temp = Path(os.environ.get("TEMP", str(Path.home() / "AppData/Local/Temp")))
     exe = temp / "vc_redist.x64.exe"
-    download_file_with_certutil_fallback(VC_REDIST_X64_URL, exe, logger)
-    code = run_and_stream([str(exe), "/install", "/passive", "/norestart"], logger)
+    download_file(VC_REDIST_X64_URL, exe, logger)
+    code, _ = stream_process_output([str(exe), "/install", "/passive", "/norestart"], logger)
     logger.info(f"VC++ installer exit code: {code}")
 
 
 def install_directx_web(logger: logging.Logger) -> None:
     temp = Path(os.environ.get("TEMP", str(Path.home() / "AppData/Local/Temp")))
     exe = temp / "dxwebsetup.exe"
-    download_file_with_certutil_fallback(DXWEBSETUP_URL, exe, logger)
-    code = run_and_stream([str(exe), "/Q"], logger)
+    download_file(DXWEBSETUP_URL, exe, logger)
+    code, _ = stream_process_output([str(exe), "/Q"], logger)
     logger.info(f"DirectX web installer exit code: {code}")
 
 
 def install_asa_certificates(logger: logging.Logger) -> None:
     """
-    - Downloads AmazonRootCA1 + r2m02 and imports them into Windows cert store.
-    - Implemented via PowerShell Import-Certificate (NOT certutil) to avoid Defender/ASR download heuristics.
+    Mandatory:
+    - Downloads AmazonRootCA1 + r2m02 and imports into Windows cert store.
+    - PowerShell Import-Certificate (Defender friendlier than certutil).
     """
     if os.name != "nt":
         logger.info("Certificate install skipped: only supported on Windows.")
@@ -674,100 +782,308 @@ def install_asa_certificates(logger: logging.Logger) -> None:
         raise RuntimeError("PowerShell not found; cannot import certificates.")
 
     temp = Path(os.environ.get("TEMP", str(Path.home() / "AppData/Local/Temp")))
-    root_path = temp / "AmazonRootCA1.cer"
-    r2m02_path = temp / "r2m02.cer"
+    root_path = temp / f"AmazonRootCA1_{os.getpid()}.cer"
+    r2m02_path = temp / f"r2m02_{os.getpid()}.cer"
 
-    download_file_with_certutil_fallback(AMAZON_ROOT_CA1_URL, root_path, logger)
-    download_file_with_certutil_fallback(AMAZON_R2M02_URL, r2m02_path, logger)
+    download_file(AMAZON_ROOT_CA1_URL, root_path, logger)
+    download_file(AMAZON_R2M02_URL, r2m02_path, logger)
 
     if is_admin():
         root_store = r"Cert:\LocalMachine\Root"
         ca_store = r"Cert:\LocalMachine\CA"
-        logger.info("Certificate import: admin -> LocalMachine store.")
+        logger.info("Certificate import: LocalMachine store.")
     else:
         root_store = r"Cert:\CurrentUser\Root"
         ca_store = r"Cert:\CurrentUser\CA"
-        logger.info("Certificate import: non-admin -> CurrentUser store.")
+        logger.info("Certificate import: CurrentUser store (non-admin).")
 
     def import_cert(cer_path: Path, store: str) -> None:
-        ps = (
-            f"Import-Certificate -FilePath '{str(cer_path)}' -CertStoreLocation '{store}' "
-            "| Out-Null"
-        )
-        cmd = [ps_exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps]
-        code = run_and_stream(cmd, logger)
+        ps = f"Import-Certificate -FilePath '{str(cer_path)}' -CertStoreLocation '{store}' | Out-Null"
+        code, out = run_quiet([ps_exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps])
         if code != 0:
-            raise RuntimeError(f"Import-Certificate failed (exit={code}) for {cer_path.name} -> {store}")
+            msg = out.splitlines()[-1].strip() if out else "unknown Import-Certificate error"
+            raise RuntimeError(f"Import-Certificate failed for {cer_path.name} -> {store}: {msg}")
 
     logger.info("Installing certificates: AmazonRootCA1 -> Root, r2m02 -> CA")
     import_cert(root_path, root_store)
     import_cert(r2m02_path, ca_store)
     logger.info("Certificates installed/updated successfully.")
 
-
-# =============================================================================
-# STEAMCMD
-# =============================================================================
-
-def ensure_steamcmd(steamcmd_dir: Path, logger: logging.Logger) -> Path:
-    ensure_dir(steamcmd_dir)
-    candidates = [
-        steamcmd_dir / "steamcmd.exe",
-        steamcmd_dir / "SteamCMD" / "steamcmd.exe",
-    ]
-    for c in candidates:
-        if c.exists():
-            try:
-                run_and_stream_collect([str(c), "+quit"], logger, cwd=c.parent)
-            except Exception as e:
-                logger.info(f"SteamCMD bootstrap warning (ignored): {e}")
-            return c
-
-    zip_path = steamcmd_dir / "steamcmd.zip"
-    download_file_with_certutil_fallback(STEAMCMD_ZIP_URL, zip_path, logger)
-    with zipfile.ZipFile(zip_path, "r") as z:
-        z.extractall(steamcmd_dir)
     try:
-        zip_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+        root_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+        r2m02_path.unlink(missing_ok=True)  # type: ignore[arg-type]
     except Exception:
         pass
 
-    for c in candidates:
-        if c.exists():
+# =============================================================================
+# SteamCMD canonical path + lock + runscript
+# =============================================================================
+
+@contextlib.contextmanager
+def exclusive_file_lock(lock_path: Path, timeout_s: int = 900, poll_s: float = 0.25):
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "a+", encoding="utf-8")
+    start = time.time()
+
+    if os.name == "nt":
+        import msvcrt
+        while True:
             try:
-                run_and_stream_collect([str(c), "+quit"], logger, cwd=c.parent)
-            except Exception as e:
-                logger.info(f"SteamCMD bootstrap warning (ignored): {e}")
-            return c
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if time.time() - start > timeout_s:
+                    raise TimeoutError(f"Timeout waiting for lock: {lock_path}")
+                time.sleep(poll_s)
+        try:
+            yield
+        finally:
+            try:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            finally:
+                fh.close()
+    else:
+        try:
+            yield
+        finally:
+            fh.close()
 
-    raise FileNotFoundError(f"steamcmd.exe not found after extraction in: {steamcmd_dir}")
 
-
-def steamcmd_update_server(steamcmd_exe: Path, server_dir: Path, logger: logging.Logger, validate: bool) -> None:
-    ensure_dir(server_dir)
-
-    base_cmd = [
-        str(steamcmd_exe),
-        "+@ShutdownOnFailedCommand", "1",
-        "+@NoPromptForPassword", "1",
-        "+force_install_dir", str(server_dir),
-        "+login", "anonymous",
-        "+app_update", str(APP_ID),
+def resolve_steamcmd_exe(steamcmd_root: str) -> Path:
+    root = Path(steamcmd_root)
+    candidates = [
+        root / "steamcmd.exe",
+        root / "SteamCMD" / "steamcmd.exe",
+        root / "steamcmd" / "steamcmd.exe",
     ]
-    if validate:
-        base_cmd.append("validate")
-    base_cmd.append("+quit")
+    for p in candidates:
+        if p.is_file():
+            return p
+    return candidates[0]
 
-    code, out = run_and_stream_collect(base_cmd, logger, cwd=steamcmd_exe.parent)
 
-    if code == 7 or "Missing configuration" in out:
-        logger.info("SteamCMD returned code 7 / Missing configuration (first-run bootstrap). Retrying once...")
-        time.sleep(2)
-        code, out = run_and_stream_collect(base_cmd, logger, cwd=steamcmd_exe.parent)
+def safe_extract_zip(zip_path: Path, dest_dir: Path) -> None:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_real = dest_dir.resolve()
 
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for zi in zf.infolist():
+            if zi.is_dir():
+                continue
+            target = (dest_dir / zi.filename).resolve()
+            if not str(target).startswith(str(dest_real)):
+                raise RuntimeError(f"Blocked unsafe zip path: {zi.filename}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(zi, "r") as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
+def ensure_steamcmd(steamcmd_root: str, logger: logging.Logger) -> Path:
+    exe = resolve_steamcmd_exe(steamcmd_root)
+    root = exe.parent
+    ensure_dir(root)
+
+    if exe.is_file():
+        # verify it boots at least once
+        code, _ = stream_process_output([str(exe), "+quit"], logger, cwd=root, log_prefix="[SteamCMD] ")
+        if code in (0, 7, 8):
+            # SteamCMD can return 7/8 during first bootstrap/self-update; treat as OK.
+            if code != 0:
+                logger.warning("[SteamCMD] boot returned exit=%s (bootstrap/self-update). Retry %s/3", code, attempt)
+            return exe
+        logger.warning("[SteamCMD] steamcmd.exe exists but boot returned code=%s -> reinstalling", code)
+
+    zip_path = root / "steamcmd.zip"
+    try:
+        if zip_path.exists():
+            zip_path.unlink()
+    except Exception:
+        pass
+
+    download_file(STEAMCMD_ZIP_URL, zip_path, logger)
+    safe_extract_zip(zip_path, root)
+    try:
+        zip_path.unlink()
+    except Exception:
+        pass
+
+    exe = resolve_steamcmd_exe(str(root))
+    if not exe.is_file():
+        raise FileNotFoundError(f"SteamCMD extraction failed: steamcmd.exe not found in {root}")
+
+    # final boot (SteamCMD may self-update/bootstrap on first run and return non-zero transiently)
+    code, _ = stream_process_output([str(exe), "+quit"], logger, cwd=root, log_prefix="[SteamCMD] ")
     if code != 0:
-        raise RuntimeError(f"SteamCMD exited with code {code}")
+        # IMPORTANT: do NOT hard-fail here. Update/Validate succeeds moments later because SteamCMD stabilizes.
+        # Also use f-string to avoid any logger %-formatting argument mismatch.
+        logger.warning(f"[SteamCMD] boot returned exit={code} after fresh install (bootstrap/self-update). Continuing...")
 
+    return exe
+
+
+def unstick_install_dir(install_dir: Path, app_id: int, logger: logging.Logger) -> bool:
+    steamapps = install_dir / "steamapps"
+    manifest = steamapps / f"appmanifest_{app_id}.acf"
+    downloading = steamapps / "downloading" / str(app_id)
+    tempdir = steamapps / "temp"
+
+    changed = False
+    if manifest.exists():
+        backup_dir = steamapps / "_repair_backup"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        target = backup_dir / f"appmanifest_{app_id}.acf.{ts}.bak"
+        try:
+            os.chmod(manifest, stat.S_IWRITE)
+        except Exception:
+            pass
+        shutil.move(str(manifest), str(target))
+        logger.warning("[SteamCMD] Moved stale manifest -> %s", target)
+        changed = True
+
+    for p in [downloading, tempdir]:
+        if p.exists():
+            try:
+                shutil.rmtree(p, ignore_errors=True)
+                logger.warning("[SteamCMD] Removed stale folder -> %s", p)
+                changed = True
+            except Exception:
+                pass
+
+    return changed
+
+def steamcmd_output_has_fatal(out: str) -> bool:
+    """
+    SteamCMD sometimes exits 0 but prints error text (rare).
+    We treat the run as failed if strong fatal markers are present.
+    """
+    if not out:
+        return False
+
+    fatal_patterns = [
+        r"\bERROR!\b",
+        r"\bFAILED\b",
+        r"Failed to install app",
+        r"Invalid Password",
+        r"No subscription",
+        r"Login Failure",
+        r"Timed out",
+        r"Disk write failure",
+        r"Missing file privileges",
+    ]
+    for pat in fatal_patterns:
+        if re.search(pat, out, re.IGNORECASE):
+            return True
+    return False
+
+
+def steamcmd_verify_install(install_dir: Path, app_id: int) -> bool:
+    """
+    Minimal verification that an update actually produced artifacts.
+    """
+    manifest = install_dir / "steamapps" / f"appmanifest_{app_id}.acf"
+    exe = install_dir / "ShooterGame" / "Binaries" / "Win64" / "ArkAscendedServer.exe"
+    return manifest.exists() or exe.exists()
+
+def steamcmd_app_update(
+    logger: logging.Logger,
+    steamcmd_exe: Path,
+    install_dir: Path,
+    app_id: int,
+    validate: bool,
+    lock_root: Path,
+    retries: int = 2,
+) -> None:
+    install_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_root / "locks" / "steamcmd.lock"
+
+    with exclusive_file_lock(lock_path):
+        # Warm-up (updates steamcmd itself / creates initial files)
+        stream_process_output(
+            [str(steamcmd_exe), "+quit"],
+            logger,
+            cwd=steamcmd_exe.parent,
+            log_prefix="[SteamCMD] ",
+        )
+
+        for attempt in range(1, retries + 2):
+            script_lines = [
+                "@ShutdownOnFailedCommand 1",
+                "@NoPromptForPassword 1",
+                f'force_install_dir "{install_dir}"',
+                "login anonymous",
+                f"app_update {app_id}" + (" validate" if validate else ""),
+                "quit",
+                "",
+            ]
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".txt", encoding="utf-8") as tf:
+                tf.write("\n".join(script_lines))
+                script_path = Path(tf.name)
+
+            try:
+                code, out = stream_process_output(
+                    [str(steamcmd_exe), "+runscript", str(script_path)],
+                    logger,
+                    cwd=steamcmd_exe.parent,
+                    log_prefix="[SteamCMD] ",
+                )
+            finally:
+                try:
+                    script_path.unlink()
+                except Exception:
+                    pass
+
+            # --------- NEW SUCCESS LOGIC ----------
+            # ExitCode 0 is the primary success signal.
+            # We only treat it as failure if strong fatal markers appear AND no install artifacts exist.
+            if code == 0:
+                if steamcmd_output_has_fatal(out) and not steamcmd_verify_install(install_dir, app_id):
+                    logger.warning("[SteamCMD] exit=0 but fatal markers found and install not verified -> retrying.")
+                else:
+                    # Optional verification (keeps first install stable)
+                    if steamcmd_verify_install(install_dir, app_id):
+                        logger.info("[SteamCMD] app_update successful (verified).")
+                        return
+
+                    # On some systems, manifest/exe might appear slightly delayed -> short retry window
+                    logger.warning("[SteamCMD] exit=0 but install not yet verified -> short wait and re-check.")
+                    time.sleep(2.0)
+                    if steamcmd_verify_install(install_dir, app_id):
+                        logger.info("[SteamCMD] app_update successful (verified after delay).")
+                        return
+
+                    # Still not verified -> do one more attempt if available
+                    if attempt < (retries + 1):
+                        logger.warning("[SteamCMD] not verified yet -> retrying (attempt %s/%s).", attempt, retries + 1)
+                        time.sleep(2.0 * attempt)
+                        continue
+
+                    raise RuntimeError("SteamCMD exit=0 but install could not be verified (no manifest/exe).")
+
+            # --------- RETRYABLE FAILURES ----------
+            retryable = False
+            if code in (7, 8) or re.search(r"state is 0x6 after update job", out or "", re.IGNORECASE):
+                retryable = True
+                changed = unstick_install_dir(install_dir, app_id, logger)
+                logger.warning(
+                    "[SteamCMD] Retryable failure (exit=%s), self-heal changed=%s, attempt %s/%s",
+                    code, changed, attempt, retries + 1
+                )
+
+            if code == 3221225477:
+                retryable = True
+                logger.warning("[SteamCMD] Crash (3221225477) -> reinstall SteamCMD + retry.")
+                _ = ensure_steamcmd(str(steamcmd_exe.parent), logger)
+
+            if retryable and attempt <= retries:
+                time.sleep(3.0 * attempt)
+                continue
+
+            # --------- HARD FAIL ----------
+            tail = "\n".join((out or "").splitlines()[-35:])
+            raise RuntimeError(f"SteamCMD failed (exit={code}). Last output:\n{tail}")
 
 # =============================================================================
 # INI (order-preserving, duplicate-key aware)
@@ -813,16 +1129,10 @@ class IniDocument:
             if l.kind == "kv":
                 return False
             if l.kind == "section":
-                # sections alone are still "empty enough" (common corruption case is almost empty file)
                 continue
-        # if only comments/whitespace, it's empty
         return True
 
     def kv_entries_by_section(self) -> Dict[str, List[Tuple[int, str, str]]]:
-        """
-        Returns section -> list of (line_index, key, value) in original order.
-        Duplicate keys are preserved.
-        """
         out: Dict[str, List[Tuple[int, str, str]]] = {}
         for idx, line in enumerate(self.lines):
             if line.kind == "kv":
@@ -830,9 +1140,6 @@ class IniDocument:
         return out
 
     def get_last_value_map(self) -> Dict[str, Dict[str, str]]:
-        """
-        Convenience map (last-value wins). Only used for diff/merge.
-        """
         data: Dict[str, Dict[str, str]] = {}
         for line in self.lines:
             if line.kind == "kv":
@@ -852,18 +1159,11 @@ class IniDocument:
         self.lines.append(IniLine(kind="section", raw=f"[{section}]\n", section=section))
 
     def set(self, section: str, key: str, value: str) -> None:
-        """
-        Set key in section:
-        - If key exists (any occurrence), update the FIRST occurrence (stable, conservative).
-        - Else, append as new kv line at end of section.
-        """
         section = section.strip()
         key = key.strip()
         value = str(value)
-
         if not section or not key:
             return
-
         self.ensure_section(section)
 
         for l in self.lines:
@@ -877,14 +1177,9 @@ class IniDocument:
         self.append_kv(section, key, value)
 
     def append_kv(self, section: str, key: str, value: str) -> int:
-        """
-        Always append a new kv line (duplicate keys allowed).
-        Returns inserted line index.
-        """
         section = section.strip()
         key = key.strip()
         value = str(value)
-
         if not section or not key:
             return -1
 
@@ -939,15 +1234,9 @@ def write_ini(path: Path, doc: IniDocument) -> None:
 
 
 def three_way_merge_ini(base: IniDocument, staged: IniDocument, upstream: IniDocument) -> IniDocument:
-    """
-    3-way merge on last-value maps (safe for ARK style):
-    - compute changes from base -> staged
-    - apply those changes onto upstream
-    NOTE: deletions are not propagated (conservative, avoids accidental removal).
-    """
     base_map = base.get_last_value_map()
     staged_map = staged.get_last_value_map()
-    up_doc = upstream  # mutate upstream doc
+    up_doc = upstream
 
     for sec, kvs in staged_map.items():
         for key, staged_val in kvs.items():
@@ -966,6 +1255,15 @@ class IniStagePaths:
     stage: Path
     stage_base: Path
     stage_meta: Path
+
+
+def staging_paths(app_base: Path, server_dir: Path) -> Tuple[Path, Path]:
+    staging_root = app_base / STAGING_DIR_NAME
+    ensure_dir(staging_root)
+    key = server_key_from_dir(server_dir)
+    root = staging_root / key
+    ensure_dir(root)
+    return root / "GameUserSettings.ini", root / "Game.ini"
 
 
 def ini_stage_paths(app_base: Path, server_dir: Path, target: str) -> IniStagePaths:
@@ -1004,21 +1302,12 @@ def ini_stage_paths(app_base: Path, server_dir: Path, target: str) -> IniStagePa
 
 
 def ensure_ini_staging_synced(paths: IniStagePaths, server_running: bool, logger: Optional[logging.Logger] = None) -> None:
-    """
-    Guarantees:
-    - stage exists and is not trivially empty/corrupt
-    - stage includes latest upstream keys (via 3-way merge)
-    Upstream source decision:
-    - if server running: use baseline (if exists) else live
-    - if server not running: use live (if exists) else baseline
-    """
     ensure_dir(paths.stage.parent)
 
     def log(msg: str) -> None:
         if logger:
             logger.info(msg)
 
-    upstream = None
     if server_running:
         upstream = paths.baseline if paths.baseline.exists() else paths.live
     else:
@@ -1047,7 +1336,6 @@ def ensure_ini_staging_synced(paths: IniStagePaths, server_running: bool, logger
             pass
         return
 
-    # repair corrupt/empty stage (your exact bug)
     try:
         stage_doc = read_ini(paths.stage)
         if paths.stage.stat().st_size == 0 or stage_doc.is_effectively_empty():
@@ -1061,14 +1349,12 @@ def ensure_ini_staging_synced(paths: IniStagePaths, server_running: bool, logger
                 log(f"INI staging repaired as empty: {paths.stage.name}")
             return
     except Exception:
-        # if anything goes sideways, rebuild from upstream
         if upstream_exists:
             shutil.copy2(upstream, paths.stage)
             shutil.copy2(upstream, paths.stage_base)
             log(f"INI staging force-repaired from upstream: {paths.stage.name}")
         return
 
-    # ensure stage_base exists
     if not paths.stage_base.exists():
         if upstream_exists:
             shutil.copy2(upstream, paths.stage_base)
@@ -1077,7 +1363,6 @@ def ensure_ini_staging_synced(paths: IniStagePaths, server_running: bool, logger
             shutil.copy2(paths.stage, paths.stage_base)
             log(f"INI stage base created from stage: {paths.stage_base.name}")
 
-    # merge if upstream changed since last base snapshot
     if upstream_exists:
         upstream_hash = file_sha256(upstream)
         base_hash = file_sha256(paths.stage_base)
@@ -1102,15 +1387,24 @@ def ensure_ini_staging_synced(paths: IniStagePaths, server_running: bool, logger
 
             log(f"INI staging merged with upstream changes: {paths.stage.name}")
 
-
 # =============================================================================
 # RCON
 # =============================================================================
 
-class RCONError(Exception): ...
-class RCONAuthError(RCONError): ...
-class RCONConnectionError(RCONError): ...
-class RCONProtocolError(RCONError): ...
+class RCONError(Exception):
+    ...
+
+
+class RCONAuthError(RCONError):
+    ...
+
+
+class RCONConnectionError(RCONError):
+    ...
+
+
+class RCONProtocolError(RCONError):
+    ...
 
 
 class BuiltinRCONClient:
@@ -1251,7 +1545,6 @@ def get_rcon_client_factory() -> Callable[[str, int, str, float], Any]:
     except Exception:
         return lambda h, p, pw, t: BuiltinRCONClient(h, p, pw, t)
 
-
 # =============================================================================
 # SERVER OPS
 # =============================================================================
@@ -1281,8 +1574,13 @@ def build_server_command(cfg: AppConfig) -> List[str]:
         f"SessionName={session}",
         f"Port={int(cfg.port)}",
         f"QueryPort={int(cfg.query_port)}",
-        f"MaxPlayers={int(cfg.max_players)}",
     ]
+
+    # MaxPlayers is enforced via INI (enterprise reliable), but keep URL arg for compatibility.
+    url_args.append(f"MaxPlayers={int(cfg.max_players)}")
+
+    if cfg.server_platform.strip():
+        url_args.append(f"ServerPlatform={cfg.server_platform.strip()}")
 
     if cfg.alt_save_directory_name.strip():
         url_args.append(f"AltSaveDirectoryName={cfg.alt_save_directory_name.strip()}")
@@ -1351,17 +1649,11 @@ def build_server_command(cfg: AppConfig) -> List[str]:
 
     return [str(exe), url, *flags]
 
-
 # =============================================================================
-# STAGING / BASELINE
+# BASELINE / STAGING APPLY
 # =============================================================================
 
 def ensure_baseline(app_base: Path, server_dir: Path, logger: logging.Logger, refresh: bool = True) -> Path:
-    """
-    Enterprise fix:
-    - Baseline must reflect the *current* live INIs right before staging is applied.
-    - refresh=True overwrites baseline if live exists (safe & correct for Stop Safe restore).
-    """
     baseline_root = app_base / BASELINE_DIR_NAME
     ensure_dir(baseline_root)
 
@@ -1383,15 +1675,6 @@ def ensure_baseline(app_base: Path, server_dir: Path, logger: logging.Logger, re
         logger.info("Baseline updated: Game.ini")
 
     return base
-
-
-def staging_paths(app_base: Path, server_dir: Path) -> Tuple[Path, Path]:
-    staging_root = app_base / STAGING_DIR_NAME
-    ensure_dir(staging_root)
-    key = server_key_from_dir(server_dir)
-    root = staging_root / key
-    ensure_dir(root)
-    return root / "GameUserSettings.ini", root / "Game.ini"
 
 
 def apply_staging_to_server(app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
@@ -1432,25 +1715,38 @@ def restore_baseline_to_server(app_base: Path, server_dir: Path, logger: logging
 def ensure_required_server_settings(cfg: AppConfig, app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
     ensure_dir((server_dir / GAMEUSERSETTINGS_REL).parent)
 
-    # guarantee staged INI is healthy + synced
-    paths = ini_stage_paths(app_base, server_dir, "gus")
-    ensure_ini_staging_synced(paths, server_running=False, logger=logger)
+    # Stage GUS
+    paths_gus = ini_stage_paths(app_base, server_dir, "gus")
+    ensure_ini_staging_synced(paths_gus, server_running=False, logger=logger)
+    doc_gus = read_ini(paths_gus.stage)
 
-    doc = read_ini(paths.stage)
-    sec = "ServerSettings"
-
-    doc.set(sec, "ServerAdminPassword", (cfg.admin_password or "").strip())
-    doc.set(sec, "ServerPassword", (cfg.join_password or "").strip())
+    # Password/RCON in [ServerSettings]
+    sec_server = "ServerSettings"
+    doc_gus.set(sec_server, "ServerAdminPassword", (cfg.admin_password or "").strip())
+    doc_gus.set(sec_server, "ServerPassword", (cfg.join_password or "").strip())
 
     if cfg.enable_rcon:
-        doc.set(sec, "RCONEnabled", "True")
-        doc.set(sec, "RCONPort", str(int(cfg.rcon_port)))
+        doc_gus.set(sec_server, "RCONEnabled", "True")
+        doc_gus.set(sec_server, "RCONPort", str(int(cfg.rcon_port)))
     else:
-        doc.set(sec, "RCONEnabled", "False")
+        doc_gus.set(sec_server, "RCONEnabled", "False")
 
-    write_ini(paths.stage, doc)
-    logger.info("Staged ServerSettings into GameUserSettings.ini (Admin/Join/RCON).")
+    # SessionSettings
+    sec_session = "/Script/Engine.GameSession"
+    doc_gus.set(sec_session, "SessionName", (cfg.server_name or DEFAULT_SERVER_NAME).strip())
+    doc_gus.set(sec_session, "MaxPlayers", str(int(cfg.max_players)))
 
+    write_ini(paths_gus.stage, doc_gus)
+    logger.info("Staged GameUserSettings.ini (Admin/Join/RCON/SessionName/MaxPlayers).")
+
+    # Stage Game.ini (critical for MaxPlayers)
+    paths_game = ini_stage_paths(app_base, server_dir, "game")
+    ensure_ini_staging_synced(paths_game, server_running=False, logger=logger)
+    doc_game = read_ini(paths_game.stage)
+
+    doc_game.set("/Script/Engine.GameSession", "MaxPlayers", str(int(cfg.max_players)))
+    write_ini(paths_game.stage, doc_game)
+    logger.info("Staged Game.ini (/Script/Engine.GameSession MaxPlayers).")
 
 # =============================================================================
 # BACKUP
@@ -1502,7 +1798,6 @@ def backup_server(cfg: AppConfig, app_base: Path, logger: logging.Logger) -> Opt
 
     return out_zip
 
-
 # =============================================================================
 # GUI LOGGING
 # =============================================================================
@@ -1511,8 +1806,19 @@ class TkTextHandler(logging.Handler):
     def __init__(self, text: tk.Text):
         super().__init__()
         self._text = text
+        self._drop_predicate: Callable[[str], bool] = lambda _msg: False
+
+    def set_drop_predicate(self, pred: Callable[[str], bool]) -> None:
+        self._drop_predicate = pred or (lambda _msg: False)
 
     def emit(self, record: logging.LogRecord) -> None:
+        try:
+            raw_msg = record.getMessage()
+            if self._drop_predicate(raw_msg):
+                return
+        except Exception:
+            pass
+
         msg = self.format(record)
 
         def append() -> None:
@@ -1527,7 +1833,7 @@ class TkTextHandler(logging.Handler):
             pass
 
 
-def build_logger(log_dir: Path, text_widget: tk.Text) -> logging.Logger:
+def build_logger(log_dir: Path, text_widget: tk.Text) -> Tuple[logging.Logger, TkTextHandler]:
     ensure_dir(log_dir)
     logger = logging.getLogger("asa_manager")
     logger.setLevel(LOG_LEVEL)
@@ -1545,8 +1851,7 @@ def build_logger(log_dir: Path, text_widget: tk.Text) -> logging.Logger:
     h_file.setFormatter(fmt)
     logger.addHandler(h_file)
 
-    return logger
-
+    return logger, h_gui
 
 # =============================================================================
 # APP
@@ -1555,7 +1860,7 @@ def build_logger(log_dir: Path, text_widget: tk.Text) -> logging.Logger:
 class ServerManagerApp:
     @staticmethod
     def static_app_base() -> Path:
-        base = app_data_dir()
+        base = resolve_storage_root()
         ensure_dir(base)
         return base
 
@@ -1589,10 +1894,22 @@ class ServerManagerApp:
 
         self._rcon_factory = get_rcon_client_factory()
 
+        # -------------------------
+        # RCON FIX (runtime snapshot)
+        # Prevents "Authentication failed" when user edits AdminPassword/Host/Port in GUI
+        # while the server is already running (server still uses the old values).
+        # -------------------------
+        self._runtime_rcon_host: Optional[str] = None
+        self._runtime_rcon_port: Optional[int] = None
+        self._runtime_rcon_password: Optional[str] = None
+
+        # Console noise filter state (GUI only)
+        self._suppress_ga_console: bool = True
+
         # INI editor state
-        self._ini_loaded_target: Optional[str] = None  # "gus" | "game"
+        self._ini_loaded_target: Optional[str] = None
         self._ini_doc: Optional[IniDocument] = None
-        self._ini_items_index: Dict[str, int] = {}  # tree iid -> IniDocument line_index
+        self._ini_items_index: Dict[str, int] = {}
         self._ini_apply_after_id: Optional[str] = None
         self._ini_selected_line_idx: Optional[int] = None
         self._ini_paths_current: Optional[IniStagePaths] = None
@@ -1600,10 +1917,15 @@ class ServerManagerApp:
         self._init_vars()
         self._build_layout()
 
-        self.logger = build_logger(self.log_dir, self.txt_log)
+        self.logger, self._gui_log_handler = build_logger(self.log_dir, self.txt_log)
+        self._gui_log_handler.set_drop_predicate(self._drop_console_message)
+        self._sync_console_log_filter_state()
         self._write_banner()
 
-        # log config warnings + write migrated config once
+        shared = _programdata_base()
+        if shared:
+            ensure_programdata_acl(shared, self.logger)
+
         for w in self._config_warnings:
             self.logger.info(f"[CONFIG] {w}")
         if self._config_migrated:
@@ -1623,6 +1945,46 @@ class ServerManagerApp:
         self._sync_auto_update_scheduler()
 
     # ---------------------------------------------------------------------
+    # Console filter (GUI only)
+    # ---------------------------------------------------------------------
+    def _sync_console_log_filter_state(self) -> None:
+        try:
+            self._suppress_ga_console = bool(self.var_hide_gameanalytics_console_logs.get())
+        except Exception:
+            self._suppress_ga_console = True
+
+    def _drop_console_message(self, message: str) -> bool:
+        # Only affects GUI console (Tk handler). File log stays complete.
+        if not getattr(self, "_suppress_ga_console", False):
+            return False
+
+        s = (message or "").strip()
+        if not s:
+            return False
+
+        # Hide GameAnalytics spam (all severities)
+        if "GameAnalytics" in s:
+            return True
+        if "api.gameanalytics.com" in s:
+            return True
+
+        return False
+
+    # ---------------------------------------------------------------------
+    # RCON FIX helpers
+    # ---------------------------------------------------------------------
+    def _capture_runtime_rcon(self, cfg: AppConfig) -> None:
+        # Capture values used to start the *running* server.
+        self._runtime_rcon_host = (cfg.rcon_host or DEFAULT_RCON_HOST).strip()
+        self._runtime_rcon_port = int(cfg.rcon_port)
+        self._runtime_rcon_password = str(cfg.admin_password or "")
+
+    def _clear_runtime_rcon(self) -> None:
+        self._runtime_rcon_host = None
+        self._runtime_rcon_port = None
+        self._runtime_rcon_password = None
+
+    # ---------------------------------------------------------------------
     # Vars
     # ---------------------------------------------------------------------
     def _init_vars(self) -> None:
@@ -1638,6 +2000,9 @@ class ServerManagerApp:
         self.var_port = tk.StringVar(master=m)
         self.var_query_port = tk.StringVar(master=m)
         self.var_max_players = tk.StringVar(master=m)
+
+        # moved to Advanced tab
+        self.var_server_platform_crossplay = tk.BooleanVar(master=m)
 
         self.var_join_password = tk.StringVar(master=m)
         self.var_admin_password = tk.StringVar(master=m)
@@ -1658,7 +2023,8 @@ class ServerManagerApp:
         self.var_auto_update_restart = tk.BooleanVar(master=m)
         self.var_auto_update_interval_min = tk.StringVar(master=m)
 
-        self.var_install_optional_certificates = tk.BooleanVar(master=m)
+        # Hide GameAnalytics spam (console only)
+        self.var_hide_gameanalytics_console_logs = tk.BooleanVar(master=m)
 
         self.var_status = tk.StringVar(master=m)
 
@@ -1691,7 +2057,6 @@ class ServerManagerApp:
         self.var_rcon_cmd = tk.StringVar(master=m)
         self.var_rcon_saved = tk.StringVar(master=m)
 
-        # INI editor vars
         self.var_ini_filter = tk.StringVar(master=m)
         self.var_ini_key = tk.StringVar(master=m)
         self.var_ini_section = tk.StringVar(master=m)
@@ -1699,7 +2064,6 @@ class ServerManagerApp:
         self.var_ini_bool = tk.StringVar(master=m)
         self.var_ini_scale = tk.DoubleVar(master=m)
 
-        # INI "add line" vars
         self.var_ini_add_section = tk.StringVar(master=m)
         self.var_ini_add_key = tk.StringVar(master=m)
         self.var_ini_add_value = tk.StringVar(master=m)
@@ -1752,7 +2116,6 @@ class ServerManagerApp:
 
         ttk.Label(lf_paths, text="Server Install Directory").grid(row=0, column=3, sticky="w", padx=(18, 0))
         ttk.Entry(lf_paths, textvariable=self.var_server_dir).grid(row=0, column=4, sticky="ew", padx=6)
-        ttk.Entry(lf_paths)  # no-op placeholder removed intentionally
         ttk.Button(lf_paths, text="Browse", command=self._browse_server_dir).grid(row=0, column=5)
 
         lf_server = ttk.LabelFrame(self.tab_server, text="Server Settings", padding=10)
@@ -1840,12 +2203,12 @@ class ServerManagerApp:
         ttk.Label(lf_ops, text="Interval (minutes)").grid(row=13, column=0, sticky="w")
         ttk.Entry(lf_ops, textvariable=self.var_auto_update_interval_min, validate="key", validatecommand=vcmd).grid(row=13, column=1, sticky="ew", padx=6)
 
-        ttk.Separator(lf_ops).grid(row=14, column=0, columnspan=2, sticky="ew", pady=10)
         ttk.Checkbutton(
             lf_ops,
-            text="Install certificates",
-            variable=self.var_install_optional_certificates
-        ).grid(row=15, column=0, sticky="w")
+            text="Hide GameAnalytics debug spam (console only)",
+            variable=self.var_hide_gameanalytics_console_logs,
+            command=self._sync_console_log_filter_state,
+        ).grid(row=14, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
         actions = ttk.Frame(self.tab_server, padding=(5, 10))
         actions.grid(row=2, column=0, columnspan=2, sticky="ew")
@@ -1896,6 +2259,15 @@ class ServerManagerApp:
         ttk.Label(lf_cluster, text="AltSaveDirectoryName (optional, per instance)").grid(row=5, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(lf_cluster, textvariable=self.var_alt_save_directory_name).grid(row=5, column=1, sticky="ew", padx=6, pady=(8, 0))
 
+        # moved: ServerPlatform
+        lf_platform = ttk.LabelFrame(self.tab_adv, text="Platform / Crossplay", padding=10)
+        lf_platform.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        ttk.Checkbutton(
+            lf_platform,
+            text='ServerPlatform: PC+XSX+WINGDK',
+            variable=self.var_server_platform_crossplay
+        ).grid(row=0, column=0, sticky="w")
+
         lf_dinos = ttk.LabelFrame(self.tab_adv, text="Dinosaur Settings (mutual exclusive)", padding=10)
         lf_dinos.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
@@ -1911,13 +2283,13 @@ class ServerManagerApp:
             ttk.Radiobutton(lf_dinos, text=label, variable=self.var_dino_mode, value=val).grid(row=i, column=0, sticky="w")
 
         lf_logs = ttk.LabelFrame(self.tab_adv, text="Logs", padding=10)
-        lf_logs.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        lf_logs.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
         ttk.Checkbutton(lf_logs, text="servergamelog", variable=self.var_log_servergamelog).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(lf_logs, text="servergamelogincludetribelogs", variable=self.var_log_servergamelogincludetribelogs).grid(row=1, column=0, sticky="w")
         ttk.Checkbutton(lf_logs, text="ServerRCONOutputTribeLogs", variable=self.var_log_serverrconoutputtribelogs).grid(row=2, column=0, sticky="w")
 
         lf_mech = ttk.LabelFrame(self.tab_adv, text="Mechanics / Performance", padding=10)
-        lf_mech.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
+        lf_mech.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
         mech_items = [
             ("DisableCustomCosmetics", self.var_m_disablecustomcosmetics),
@@ -2117,6 +2489,8 @@ class ServerManagerApp:
         self.var_query_port.set(str(cfg.query_port))
         self.var_max_players.set(str(cfg.max_players))
 
+        self.var_server_platform_crossplay.set(cfg.server_platform.strip() == "PC+XSX+WINGDK")
+
         self.var_join_password.set(cfg.join_password)
         self.var_admin_password.set(cfg.admin_password)
 
@@ -2138,7 +2512,8 @@ class ServerManagerApp:
         self.var_auto_update_restart.set(cfg.auto_update_restart)
         self.var_auto_update_interval_min.set(str(cfg.auto_update_interval_min))
 
-        self.var_install_optional_certificates.set(bool(cfg.install_optional_certificates))
+        self.var_hide_gameanalytics_console_logs.set(bool(cfg.hide_gameanalytics_console_logs))
+        self._sync_console_log_filter_state()
 
         self.var_cluster_enable.set(cfg.cluster_enable)
         self.var_cluster_id.set(cfg.cluster_id)
@@ -2169,11 +2544,6 @@ class ServerManagerApp:
         self._rcon_refresh_saved(cfg)
 
     def _collect_vars_to_cfg(self) -> AppConfig:
-        """
-        Enterprise fix:
-        - Start from current self.cfg (deepcopy) so newly added config fields
-          (or fields not yet bound to UI) are not lost on autosave.
-        """
         cfg = copy.deepcopy(self.cfg) if isinstance(self.cfg, AppConfig) else AppConfig()
         cfg.schema_version = AppConfig().schema_version
 
@@ -2187,6 +2557,9 @@ class ServerManagerApp:
         cfg.query_port = safe_int(self.var_query_port.get(), DEFAULT_QUERY_PORT) or DEFAULT_QUERY_PORT
         cfg.max_players = safe_int(self.var_max_players.get(), DEFAULT_MAX_PLAYERS) or DEFAULT_MAX_PLAYERS
 
+        cfg.server_platform = "PC+XSX+WINGDK" if bool(self.var_server_platform_crossplay.get()) else ""
+
+        # RCON FIX NOTE: keep mapping strict - JoinPassword != AdminPassword
         cfg.join_password = (self.var_join_password.get() or "").strip()
         cfg.admin_password = (self.var_admin_password.get() or "").strip()
 
@@ -2208,7 +2581,9 @@ class ServerManagerApp:
         cfg.auto_update_restart = bool(self.var_auto_update_restart.get())
         cfg.auto_update_interval_min = safe_int(self.var_auto_update_interval_min.get(), 360) or 360
 
-        cfg.install_optional_certificates = bool(self.var_install_optional_certificates.get())
+        cfg.hide_gameanalytics_console_logs = bool(self.var_hide_gameanalytics_console_logs.get())
+
+        cfg.install_optional_certificates = True
 
         cfg.cluster_enable = bool(self.var_cluster_enable.get())
         cfg.cluster_id = self.var_cluster_id.get().strip()
@@ -2270,12 +2645,13 @@ class ServerManagerApp:
             self.var_steamcmd_dir, self.var_server_dir,
             self.var_map_preset, self.var_map_custom, self.var_server_name,
             self.var_port, self.var_query_port, self.var_max_players,
+            self.var_server_platform_crossplay,
             self.var_join_password, self.var_admin_password,
             self.var_enable_battleye, self.var_automanaged_mods, self.var_validate_on_update,
             self.var_enable_rcon, self.var_rcon_host, self.var_rcon_port,
             self.var_backup_on_stop, self.var_backup_dir, self.var_backup_retention, self.var_backup_include_configs,
             self.var_auto_update_restart, self.var_auto_update_interval_min,
-            self.var_install_optional_certificates,
+            self.var_hide_gameanalytics_console_logs,
             self.var_cluster_enable, self.var_cluster_id, self.var_cluster_custom_path_enable, self.var_cluster_dir_override,
             self.var_no_transfer_from_filtering, self.var_alt_save_directory_name,
             self.var_dino_mode,
@@ -2293,6 +2669,11 @@ class ServerManagerApp:
                 pass
 
         self.txt_mods.bind("<KeyRelease>", lambda e: (None if self._autosave_guard else self._schedule_autosave()))
+
+        try:
+            self.var_hide_gameanalytics_console_logs.trace_add("write", lambda *_: self._sync_console_log_filter_state())
+        except Exception:
+            pass
 
     def _schedule_autosave(self) -> None:
         if self._autosave_after_id:
@@ -2353,6 +2734,12 @@ class ServerManagerApp:
             if not busy and not self.var_status.get().startswith("Config invalid"):
                 self._set_status("Ready")
 
+    def _ui(self, fn: Callable[[], None]) -> None:
+        try:
+            self.root.after(0, fn)
+        except Exception:
+            pass
+
     def _run_task(self, name: str, fn: Callable[[], None]) -> None:
         if self._is_busy():
             return
@@ -2365,10 +2752,7 @@ class ServerManagerApp:
                 self.logger.info(f"=== {name} completed ===")
             except Exception as e:
                 self.logger.error(f"{name} failed: {e}")
-                try:
-                    messagebox.showerror(name, str(e))
-                except Exception:
-                    pass
+                self._ui(lambda: messagebox.showerror(name, str(e)))
             finally:
                 self._set_busy(False)
 
@@ -2443,7 +2827,7 @@ class ServerManagerApp:
             if has_directx_legacy():
                 logger.info("DirectX legacy OK (post-install)")
             else:
-                logger.info("DirectX legacy still not detected after install. No reinstall loop. Check %WINDIR%\\Logs\\DirectX.log if needed.")
+                logger.info("DirectX legacy DLLs still not detected after install (this can be normal).")
 
     # ---------------------------------------------------------------------
     # First Install / Update Validate
@@ -2453,18 +2837,27 @@ class ServerManagerApp:
             self.cfg = self._collect_vars_to_cfg()
             self.store.save(self.cfg)
 
+            shared = _programdata_base()
+            if shared:
+                ensure_programdata_acl(shared, self.logger)
+
             if not is_admin():
                 self.logger.info("Warning: Not running as Administrator. Installs may fail.")
 
             self._ensure_dependencies_first_install(self.logger)
+            install_asa_certificates(self.logger)
 
-            if bool(self.cfg.install_optional_certificates):
-                install_asa_certificates(self.logger)
-            else:
-                self.logger.info("Optional certificate install disabled (default).")
+            steamcmd_exe = ensure_steamcmd(self.cfg.steamcmd_dir, self.logger)
 
-            steamcmd_exe = ensure_steamcmd(Path(self.cfg.steamcmd_dir), self.logger)
-            steamcmd_update_server(steamcmd_exe, Path(self.cfg.server_dir), self.logger, validate=False)
+            steamcmd_app_update(
+                logger=self.logger,
+                steamcmd_exe=steamcmd_exe,
+                install_dir=Path(self.cfg.server_dir),
+                app_id=ARK_ASA_APP_ID,
+                validate=False,
+                lock_root=Path(shared or r"C:\ProgramData\ARK-Ascended-Server-Manager"),
+                retries=2,
+            )
 
             exe = ark_server_exe(Path(self.cfg.server_dir))
             self.logger.info(f"Server executable: {exe if exe.exists() else 'NOT FOUND'}")
@@ -2476,8 +2869,18 @@ class ServerManagerApp:
             self.cfg = self._collect_vars_to_cfg()
             self.store.save(self.cfg)
 
-            steamcmd_exe = ensure_steamcmd(Path(self.cfg.steamcmd_dir), self.logger)
-            steamcmd_update_server(steamcmd_exe, Path(self.cfg.server_dir), self.logger, validate=True)
+            shared = _programdata_base()
+            steamcmd_exe = ensure_steamcmd(self.cfg.steamcmd_dir, self.logger)
+
+            steamcmd_app_update(
+                logger=self.logger,
+                steamcmd_exe=steamcmd_exe,
+                install_dir=Path(self.cfg.server_dir),
+                app_id=ARK_ASA_APP_ID,
+                validate=True,
+                lock_root=Path(shared or r"C:\ProgramData\ARK-Ascended-Server-Manager"),
+                retries=2,
+            )
 
         self._run_task("Update / Validate", job)
 
@@ -2486,10 +2889,7 @@ class ServerManagerApp:
     # ---------------------------------------------------------------------
     def _stage_required_configs_for_start(self) -> None:
         server_dir = Path(self.cfg.server_dir)
-
-        # baseline MUST be refreshed right before applying staging
         ensure_baseline(self.app_base, server_dir, self.logger, refresh=True)
-
         ensure_required_server_settings(self.cfg, self.app_base, server_dir, self.logger)
 
     def start_server(self) -> None:
@@ -2502,8 +2902,14 @@ class ServerManagerApp:
             if not exe.exists():
                 raise FileNotFoundError(f"Server EXE not found: {exe}")
 
+            if self.cfg.enable_rcon and not (self.cfg.admin_password or "").strip():
+                raise RuntimeError("Admin/RCON password is empty. Set 'Admin Password (RCON/Admin)' before starting.")
+
             self._stage_required_configs_for_start()
             apply_staging_to_server(self.app_base, server_dir, self.logger)
+
+            # RCON FIX: capture *runtime* values used to start this server instance
+            self._capture_runtime_rcon(self.cfg)
 
             cmd = build_server_command(self.cfg)
             self.logger.info("Starting server...")
@@ -2522,10 +2928,11 @@ class ServerManagerApp:
                     text=True,
                     bufsize=1,
                     universal_newlines=True,
+                    creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
 
             threading.Thread(target=self._server_log_reader, daemon=True).start()
-            self.root.after(0, self._refresh_buttons)
+            self._ui(self._refresh_buttons)
 
         self._run_task("Start Server", job)
 
@@ -2539,8 +2946,6 @@ class ServerManagerApp:
             for line in p.stdout:
                 if self._stop_log_reader.is_set():
                     break
-                if "GameAnalytics" in line or "Couldn't resolve host name" in line:
-                    continue
                 self.logger.info(line.rstrip())
         except Exception as e:
             self.logger.info(f"Log reader stopped: {e}")
@@ -2551,19 +2956,36 @@ class ServerManagerApp:
                     self.logger.info(f"Server exited with code {code}")
             except Exception:
                 pass
-            self.root.after(0, self._refresh_buttons)
+
+            # RCON FIX: server is gone -> runtime snapshot is no longer valid
+            self._clear_runtime_rcon()
+
+            self._ui(self._refresh_buttons)
 
     def _rcon_try(self, cmd: str, timeout: float = 4.0, retry_window_sec: int = 15) -> str:
         if not self.cfg.enable_rcon:
             raise RuntimeError("RCON disabled in config.")
-        if not (self.cfg.admin_password or "").strip():
+
+        # RCON FIX:
+        # If server is running, always use the runtime snapshot captured at Start.
+        # This prevents "Authentication failed" when GUI values changed after start.
+        if self._is_server_running() and self._runtime_rcon_password is not None:
+            host = (self._runtime_rcon_host or DEFAULT_RCON_HOST).strip()
+            port = int(self._runtime_rcon_port or DEFAULT_RCON_PORT)
+            password = self._runtime_rcon_password
+        else:
+            host = (self.cfg.rcon_host or DEFAULT_RCON_HOST).strip()
+            port = int(self.cfg.rcon_port)
+            password = (self.cfg.admin_password or "").strip()
+
+        if not password:
             raise RuntimeError("Admin password is empty.")
 
         start = time.time()
         last_err: Optional[Exception] = None
         while time.time() - start < retry_window_sec:
             try:
-                client = self._rcon_factory(self.cfg.rcon_host, int(self.cfg.rcon_port), self.cfg.admin_password, timeout)
+                client = self._rcon_factory(host, port, password, timeout)
                 with client as c:
                     return str(c.command(cmd))
             except Exception as e:
@@ -2620,81 +3042,15 @@ class ServerManagerApp:
         except Exception:
             pass
 
-    def stop_server_safe(self) -> None:
-        def job() -> None:
-            self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
-
-            with self._server_proc_lock:
-                p = self._server_proc
-
-            if not p or p.poll() is not None:
-                self.logger.info("Server not running.")
-                return
-
-            if self.cfg.enable_rcon:
-                try:
-                    self.logger.info("RCON: SaveWorld")
-                    _ = self._rcon_try("SaveWorld", timeout=6.0)
-                except Exception as e:
-                    self.logger.info(f"RCON SaveWorld failed: {e}")
-
-                try:
-                    self.logger.info("RCON: DoExit")
-                    _ = self._rcon_try("DoExit", timeout=6.0)
-                except Exception as e:
-                    self.logger.info(f"RCON DoExit failed -> terminate fallback: {e}")
-
-            t_end = time.time() + 20
-            while time.time() < t_end and p.poll() is None:
-                time.sleep(0.5)
-
-            if p.poll() is None:
-                self.logger.info("Terminating server process...")
-                self._stop_log_reader.set()
-                p.terminate()
-                try:
-                    p.wait(timeout=12)
-                except subprocess.TimeoutExpired:
-                    self.logger.info("Killing server process...")
-                    p.kill()
-                    p.wait(timeout=5)
-
-            with self._server_proc_lock:
-                self._server_proc = None
-
-            self.logger.info("Server stopped.")
-
-            if self.cfg.backup_on_stop:
-                backup_server(self.cfg, self.app_base, self.logger)
-
-            restore_baseline_to_server(self.app_base, Path(self.cfg.server_dir), self.logger)
-            self.root.after(0, self._refresh_buttons)
-
-        self._run_task("Stop Server", job)
-
-    def update_and_restart_safe(self) -> None:
-        def job() -> None:
-            self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
-
-            if self._is_server_running():
-                self.logger.info("Server running -> performing safe stop before update.")
-                self._stop_server_safe_inline()
-
-            steamcmd_exe = ensure_steamcmd(Path(self.cfg.steamcmd_dir), self.logger)
-            steamcmd_update_server(steamcmd_exe, Path(self.cfg.server_dir), self.logger, validate=bool(self.cfg.validate_on_update))
-
-            self.logger.info("Restarting server after update...")
-            self._start_server_inline()
-
-        self._run_task("Update & Restart", job)
-
-    def _stop_server_safe_inline(self) -> None:
+    def _stop_server_impl(self, inline: bool) -> None:
         with self._server_proc_lock:
             p = self._server_proc
 
         if not p or p.poll() is not None:
+            if not inline:
+                self.logger.info("Server not running.")
+            # RCON FIX: ensure snapshot cleared if process already ended
+            self._clear_runtime_rcon()
             return
 
         if self.cfg.enable_rcon:
@@ -2728,12 +3084,52 @@ class ServerManagerApp:
         with self._server_proc_lock:
             self._server_proc = None
 
-        self.logger.info("Server stopped (inline).")
+        # RCON FIX: server stopped -> snapshot invalid
+        self._clear_runtime_rcon()
+
+        self.logger.info("Server stopped.")
 
         if self.cfg.backup_on_stop:
             backup_server(self.cfg, self.app_base, self.logger)
 
         restore_baseline_to_server(self.app_base, Path(self.cfg.server_dir), self.logger)
+        if not inline:
+            self._ui(self._refresh_buttons)
+
+    def stop_server_safe(self) -> None:
+        def job() -> None:
+            self.cfg = self._collect_vars_to_cfg()
+            self.store.save(self.cfg)
+            self._stop_server_impl(inline=False)
+
+        self._run_task("Stop Server", job)
+
+    def update_and_restart_safe(self) -> None:
+        def job() -> None:
+            self.cfg = self._collect_vars_to_cfg()
+            self.store.save(self.cfg)
+
+            if self._is_server_running():
+                self.logger.info("Server running -> performing safe stop before update.")
+                self._stop_server_impl(inline=True)
+
+            shared = _programdata_base()
+            steamcmd_exe = ensure_steamcmd(self.cfg.steamcmd_dir, self.logger)
+
+            steamcmd_app_update(
+                logger=self.logger,
+                steamcmd_exe=steamcmd_exe,
+                install_dir=Path(self.cfg.server_dir),
+                app_id=ARK_ASA_APP_ID,
+                validate=bool(self.cfg.validate_on_update),
+                lock_root=Path(shared or r"C:\ProgramData\ARK-Ascended-Server-Manager"),
+                retries=2,
+            )
+
+            self.logger.info("Restarting server after update...")
+            self._start_server_inline()
+
+        self._run_task("Update & Restart", job)
 
     def _start_server_inline(self) -> None:
         server_dir = Path(self.cfg.server_dir)
@@ -2741,8 +3137,14 @@ class ServerManagerApp:
         if not exe.exists():
             raise FileNotFoundError(f"Server EXE not found: {exe}")
 
+        if self.cfg.enable_rcon and not (self.cfg.admin_password or "").strip():
+            raise RuntimeError("Admin/RCON password is empty. Set 'Admin Password (RCON/Admin)' before starting.")
+
         self._stage_required_configs_for_start()
         apply_staging_to_server(self.app_base, server_dir, self.logger)
+
+        # RCON FIX: capture runtime values for this running instance
+        self._capture_runtime_rcon(self.cfg)
 
         cmd = build_server_command(self.cfg)
         self.logger.info("Starting server (inline)...")
@@ -2758,10 +3160,11 @@ class ServerManagerApp:
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
+                creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
 
         threading.Thread(target=self._server_log_reader, daemon=True).start()
-        self.root.after(0, self._refresh_buttons)
+        self._ui(self._refresh_buttons)
 
     def backup_now(self) -> None:
         def job() -> None:
@@ -2807,23 +3210,19 @@ class ServerManagerApp:
                 continue
 
             self.logger.info("Auto update trigger reached -> Update & Restart (Safe).")
-            self.root.after(0, self.update_and_restart_safe)
+            self._ui(self.update_and_restart_safe)
 
     # ---------------------------------------------------------------------
-    # INI Editor (Enterprise)
+    # INI Editor
     # ---------------------------------------------------------------------
     def _ini_load_target(self, target: str) -> None:
         self.cfg = self._collect_vars_to_cfg()
         self.store.save(self.cfg)
 
         server_dir = Path(self.cfg.server_dir)
-
-        # Ensure baseline exists (but do not refresh here; editor should be non-destructive)
         ensure_dir(self.app_base / BASELINE_DIR_NAME / server_key_from_dir(server_dir))
 
         paths = ini_stage_paths(self.app_base, server_dir, target)
-
-        # Critical: staging must sync from upstream (baseline if server running)
         ensure_ini_staging_synced(paths, server_running=self._is_server_running(), logger=self.logger)
 
         self._ini_loaded_target = target
@@ -2835,7 +3234,6 @@ class ServerManagerApp:
         else:
             self.lbl_ini_target.configure(text=f"Editing STAGED Game.ini  |  {paths.stage}")
 
-        # prefill add-section with current selection (or common default)
         if not self.var_ini_add_section.get().strip():
             self.var_ini_add_section.set("ServerSettings")
 
@@ -2848,10 +3246,6 @@ class ServerManagerApp:
         self._ini_load_target("game")
 
     def open_loaded_ini(self) -> None:
-        """
-        Requirement:
-        - Open Explorer for BOTH Live and Staging locations (file selected).
-        """
         if not self._ini_paths_current:
             return
         paths = self._ini_paths_current
@@ -2879,9 +3273,7 @@ class ServerManagerApp:
         idx_to_iid: Dict[int, str] = {}
         selected_idx = self._ini_selected_line_idx
 
-        # preserve insertion order
         for section, entries in kv_by_section.items():
-            # filter entries
             visible: List[Tuple[int, str, str]] = []
             for idx, key, val in entries:
                 hay = f"{section}\n{key}\n{val}".lower()
@@ -2895,7 +3287,6 @@ class ServerManagerApp:
             sec_iid = self.tree_ini.insert("", "end", text=f"[{section}]", values=("",))
             self.tree_ini.item(sec_iid, open=True)
 
-            # count duplicates for display
             counts: Dict[str, int] = {}
             totals: Dict[str, int] = {}
             for _, k, _ in entries:
@@ -2909,7 +3300,6 @@ class ServerManagerApp:
                 self._ini_items_index[iid] = idx
                 idx_to_iid[idx] = iid
 
-        # restore selection if possible
         if selected_idx is not None and selected_idx in idx_to_iid:
             iid = idx_to_iid[selected_idx]
             try:
@@ -2938,7 +3328,6 @@ class ServerManagerApp:
         self.var_ini_section.set(line.section)
         self.var_ini_key.set(line.key)
 
-        # also prefill "add line" section with current section
         if line.section.strip():
             self.var_ini_add_section.set(line.section)
 
@@ -3104,7 +3493,6 @@ class ServerManagerApp:
         self._ini_refresh_tree()
         self._set_status("INI line deleted")
 
-
 # =============================================================================
 # ENTRYPOINT
 # =============================================================================
@@ -3142,4 +3530,5 @@ def launch_gui() -> None:
 
 
 if __name__ == "__main__":
+    import sys  # keep here to not pollute top imports with pyinstaller internals
     launch_gui()
