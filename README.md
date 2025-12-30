@@ -79,6 +79,7 @@ Built for **safe operations**, **reliable RCON**, and a clean **staging-based co
 pyinstaller --noconfirm --clean --onefile --windowed `
   --name "ARK-ASA-Manager" `
   --icon ".\assets\app.ico" `
+  --add-data ".\assets;assets" `
   --collect-all rcon `
   ".\ARK-Ascended-Server-Manager.py"
 ```
@@ -187,4 +188,6 @@ The manager may download or use:
 ---
 
 ## Star History
-[![Star History Chart](https://api.star-history.com/svg?repos=Ch4r0ne/ARK-Ascended-Server-Manager&type=Date)](https://star-history.com/#Ch4r0ne/ARK-Ascended-Server-Manager&Date)
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)](https://www.star-history.com/#Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)
+
