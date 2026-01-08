@@ -16,18 +16,22 @@ import ssl
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import zipfile
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
+from tkinter import font as tkfont
 from tkinter import ttk
+import uuid
 
 try:
     import winreg  # type: ignore
@@ -86,6 +90,12 @@ LOG_FILE_NAME = "app.log"
 STAGING_DIR_NAME = "staging"
 BASELINE_DIR_NAME = "baseline"
 BACKUP_DIR_NAME = "backups"
+SERVERS_DIR_NAME = "servers"
+LOCKS_DIR_NAME = "locks"
+GLOBAL_CONFIG_NAME = "global.json"
+LEGACY_CONFIG_NAME = "config.json"
+SERVER_CONFIG_NAME = "server.json"
+DISCORD_STATE_FILE_NAME = "discord_state.json"
 
 LOG_LEVEL = logging.INFO
 
@@ -99,6 +109,20 @@ DIRECTX_LEGACY_DLLS = [
 
 GAMEUSERSETTINGS_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\GameUserSettings.ini")
 GAME_INI_REL = Path(r"ShooterGame\Saved\Config\WindowsServer\Game.ini")
+
+THEME_COLORS = {
+    "bg": "#f5f7fb",
+    "surface": "#ffffff",
+    "border": "#d7deea",
+    "text": "#1f2937",
+    "muted": "#6b7280",
+    "accent": "#2563eb",
+    "accent_dark": "#1d4ed8",
+    "accent_light": "#e6eefc",
+    "console_bg": "#0b1220",
+    "console_fg": "#e2e8f0",
+    "console_select": "#1e293b",
+}
 
 # =============================================================================
 # PATH / ICON HELPERS
@@ -198,6 +222,182 @@ def apply_window_icon(root: tk.Tk) -> None:
     except Exception:
         _set_tk_window_icon_from_exe(root)
 
+
+def configure_modern_theme(root: tk.Tk) -> None:
+    style = ttk.Style()
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
+
+    default_font = tkfont.nametofont("TkDefaultFont")
+    default_font.configure(family="Segoe UI", size=10)
+    tkfont.nametofont("TkTextFont").configure(family="Segoe UI", size=10)
+    tkfont.nametofont("TkHeadingFont").configure(family="Segoe UI Semibold", size=10)
+
+    theme = THEME_COLORS
+    root.configure(bg=theme["bg"])
+
+    style.configure(
+        ".",
+        background=theme["bg"],
+        foreground=theme["text"],
+        bordercolor=theme["border"],
+        lightcolor=theme["border"],
+        darkcolor=theme["border"],
+        troughcolor=theme["bg"],
+        focuscolor=theme["accent"],
+        borderwidth=1,
+    )
+
+    style.configure("TFrame", background=theme["bg"])
+    style.configure("TLabel", background=theme["bg"], foreground=theme["text"])
+    style.configure("TSeparator", background=theme["border"])
+
+    style.configure("TLabelframe", background=theme["bg"], bordercolor=theme["border"])
+    style.configure(
+        "TLabelframe.Label",
+        background=theme["bg"],
+        foreground=theme["text"],
+        font=("Segoe UI Semibold", 10),
+    )
+
+    style.configure(
+        "TButton",
+        background=theme["surface"],
+        foreground=theme["text"],
+        padding=(12, 6),
+        relief="flat",
+        borderwidth=1,
+    )
+    style.map(
+        "TButton",
+        background=[
+            ("active", theme["accent_light"]),
+            ("pressed", theme["accent_light"]),
+            ("disabled", theme["bg"]),
+        ],
+        foreground=[("disabled", theme["muted"])],
+    )
+
+    style.configure(
+        "TEntry",
+        fieldbackground=theme["surface"],
+        foreground=theme["text"],
+        padding=4,
+    )
+    style.configure(
+        "TCombobox",
+        fieldbackground=theme["surface"],
+        background=theme["surface"],
+        foreground=theme["text"],
+        padding=4,
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", theme["surface"])],
+        foreground=[("readonly", theme["text"])],
+        selectbackground=[("readonly", theme["accent_light"])],
+    )
+
+    style.configure("TCheckbutton", background=theme["bg"], foreground=theme["text"])
+    style.configure("TRadiobutton", background=theme["bg"], foreground=theme["text"])
+    style.configure("TScale", background=theme["bg"], troughcolor=theme["border"])
+
+    style.configure("TNotebook", background=theme["bg"], borderwidth=0)
+    style.configure(
+        "TNotebook.Tab",
+        background=theme["bg"],
+        foreground=theme["muted"],
+        padding=(14, 8),
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", theme["surface"])],
+        foreground=[("selected", theme["text"])],
+    )
+
+    style.configure(
+        "Treeview",
+        background=theme["surface"],
+        fieldbackground=theme["surface"],
+        foreground=theme["text"],
+        rowheight=24,
+        bordercolor=theme["border"],
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", theme["accent"])],
+        foreground=[("selected", "#ffffff")],
+    )
+    style.configure(
+        "Treeview.Heading",
+        background=theme["bg"],
+        foreground=theme["text"],
+        relief="flat",
+        padding=(8, 6),
+    )
+
+    style.configure(
+        "Vertical.TScrollbar",
+        background=theme["border"],
+        troughcolor=theme["bg"],
+        arrowcolor=theme["text"],
+    )
+    style.configure(
+        "Horizontal.TScrollbar",
+        background=theme["border"],
+        troughcolor=theme["bg"],
+        arrowcolor=theme["text"],
+    )
+
+
+def configure_dpi_awareness() -> None:
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+def apply_tk_scaling(root: tk.Tk) -> None:
+    try:
+        dpi = root.winfo_fpixels("1i")
+        scaling = max(1.0, dpi / 72.0)
+        root.tk.call("tk", "scaling", scaling)
+    except Exception:
+        pass
+
+
+def _scaled_dimension(root: tk.Tk, size: int) -> int:
+    try:
+        scaling = float(root.tk.call("tk", "scaling"))
+    except Exception:
+        scaling = 1.0
+    return max(1, int(size * scaling))
+
+
+def apply_min_window_size(root: tk.Tk, width: int, height: int) -> None:
+    scaled_w = _scaled_dimension(root, width)
+    scaled_h = _scaled_dimension(root, height)
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    root.minsize(min(scaled_w, screen_w), min(scaled_h, screen_h))
+
+
+def apply_initial_window_geometry(root: tk.Tk, width: int, height: int) -> None:
+    scaled_w = _scaled_dimension(root, width)
+    scaled_h = _scaled_dimension(root, height)
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    target_w = min(scaled_w, int(screen_w * 0.95))
+    target_h = min(scaled_h, int(screen_h * 0.9))
+    root.geometry(f"{target_w}x{target_h}")
+
 # =============================================================================
 # LOW-LEVEL UTILITIES
 # =============================================================================
@@ -229,6 +429,18 @@ def ensure_dir(p: Path) -> None:
 
 def now_ts() -> str:
     return time.strftime("%Y-%m-%d_%H-%M-%S")
+
+
+def format_duration(total_seconds: int) -> str:
+    seconds = max(0, int(total_seconds))
+    mins, sec = divmod(seconds, 60)
+    hrs, mins = divmod(mins, 60)
+    days, hrs = divmod(hrs, 24)
+    if days > 0:
+        return f"{days}d {hrs}h {mins}m"
+    if hrs > 0:
+        return f"{hrs}h {mins}m"
+    return f"{mins}m {sec}s"
 
 
 def safe_int(s: Any, default: int) -> int:
@@ -357,35 +569,44 @@ def _appdata_base() -> Path:
 
 
 def resolve_storage_root() -> Path:
-    shared = _programdata_base()
-    user = _appdata_base()
-    portable = _portable_base_dir() / APPDATA_DIR_NAME
-
-    def cfg_exists(root: Path) -> bool:
-        return (root / "config.json").exists()
-
-    if shared and cfg_exists(shared):
-        if _is_writable_dir(shared):
-            return shared
-        try:
-            ensure_dir(user)
-            shutil.copy2(shared / "config.json", user / "config.json")
-        except Exception:
-            pass
-        return user
-
-    if cfg_exists(user):
-        return user
-    if cfg_exists(portable):
+    if os.name != "nt":
+        user = _appdata_base()
+        if _is_writable_dir(user):
+            return user
+        portable = _portable_base_dir() / APPDATA_DIR_NAME
+        ensure_dir(portable)
         return portable
 
-    if shared and _is_writable_dir(shared):
-        return shared
-    if _is_writable_dir(user):
-        return user
+    shared = _programdata_base()
+    if not shared:
+        user = _appdata_base()
+        if _is_writable_dir(user):
+            return user
+        portable = _portable_base_dir() / APPDATA_DIR_NAME
+        ensure_dir(portable)
+        return portable
 
-    ensure_dir(portable)
-    return portable
+    try:
+        ensure_dir(shared)
+    except Exception:
+        user = _appdata_base()
+        if _is_writable_dir(user):
+            return user
+        portable = _portable_base_dir() / APPDATA_DIR_NAME
+        ensure_dir(portable)
+        return portable
+
+    if _is_writable_dir(shared):
+        return shared
+
+    if is_admin():
+        ensure_programdata_acl(shared)
+        if _is_writable_dir(shared):
+            return shared
+
+    raise PermissionError(
+        f"Shared storage at {shared} is not writable. Admin rights are required to initialize shared storage."
+    )
 
 
 def ensure_programdata_acl(shared_root: Path, logger: Optional[logging.Logger] = None) -> None:
@@ -500,8 +721,24 @@ def stream_process_output(
     return code, "\n".join(collected)
 
 
-def server_key_from_dir(server_dir: Path) -> str:
-    return str(server_dir).replace(":", "").replace("\\", "_").replace("/", "_")
+def server_root(app_base: Path, server_id: str) -> Path:
+    return app_base / SERVERS_DIR_NAME / server_id
+
+
+def server_config_path(app_base: Path, server_id: str) -> Path:
+    return server_root(app_base, server_id) / SERVER_CONFIG_NAME
+
+
+def server_lock_path(app_base: Path, server_id: str) -> Path:
+    return server_root(app_base, server_id) / LOCKS_DIR_NAME / "server.lock"
+
+
+def global_lock_path(app_base: Path) -> Path:
+    return app_base / LOCKS_DIR_NAME / "global.lock"
+
+
+def server_discord_state_path(app_base: Path, server_id: str) -> Path:
+    return server_root(app_base, server_id) / DISCORD_STATE_FILE_NAME
 
 # =============================================================================
 # DOWNLOAD (urllib only)
@@ -533,10 +770,23 @@ def download_file(url: str, dest: Path, logger: logging.Logger, timeout: int = D
 # =============================================================================
 
 @dataclass
-class AppConfig:
-    schema_version: int = 7
+class ServerRef:
+    id: str
+    display_name: str
+    server_dir: str
 
+
+@dataclass
+class GlobalConfig:
+    schema_version: int = 1
     steamcmd_dir: str = DEFAULT_STEAMCMD_DIR
+    last_selected_server_id: str = ""
+    servers: List[ServerRef] = field(default_factory=list)
+
+
+@dataclass
+class AppConfig:
+    schema_version: int = 9
     server_dir: str = DEFAULT_SERVER_DIR
 
     map_name: str = DEFAULT_MAP
@@ -609,6 +859,19 @@ class AppConfig:
     mech_stasiskeepcontrollers: bool = False
     mech_ignoredupeditems: bool = False
 
+    custom_start_args: str = ""
+
+    discord_enable: bool = False
+    discord_webhook_url: str = ""
+    discord_poll_interval_sec: int = 300
+    discord_notify_start: bool = True
+    discord_notify_stop: bool = True
+    discord_notify_join: bool = True
+    discord_notify_leave: bool = False
+    discord_notify_crash: bool = True
+    discord_mention_mode: str = "name"
+    discord_mention_map_json: str = ""
+
     def normalized_mods(self) -> str:
         raw = (self.mods or "").strip()
         if not raw:
@@ -623,10 +886,17 @@ class ConfigLoadResult:
     migrated: bool
     warnings: List[str]
 
+@dataclass
+class GlobalConfigLoadResult:
+    cfg: GlobalConfig
+    migrated: bool
+    warnings: List[str]
 
-class ConfigStore:
-    def __init__(self, path: Path):
+
+class ServerConfigStore:
+    def __init__(self, path: Path, lock_path: Path):
         self.path = path
+        self.lock_path = lock_path
         self._extra: Dict[str, Any] = {}
 
     def load(self) -> ConfigLoadResult:
@@ -691,12 +961,100 @@ class ConfigStore:
         return ConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
 
     def save(self, cfg: AppConfig) -> None:
-        ensure_dir(self.path.parent)
-        base = asdict(cfg)
-        for k, v in self._extra.items():
-            if k not in base:
-                base[k] = v
-        atomic_write_text(self.path, json.dumps(base, indent=2), encoding="utf-8")
+        with exclusive_file_lock(self.lock_path):
+            ensure_dir(self.path.parent)
+            base = asdict(cfg)
+            for k, v in self._extra.items():
+                if k not in base:
+                    base[k] = v
+            if self.path.exists():
+                try:
+                    bak = self.path.with_name(f"server.bak.{now_ts()}.json")
+                    shutil.copy2(self.path, bak)
+                except Exception:
+                    pass
+            atomic_write_text(self.path, json.dumps(base, indent=2), encoding="utf-8")
+
+    def save_new(self, cfg: AppConfig) -> None:
+        with exclusive_file_lock(self.lock_path):
+            if self.path.exists():
+                raise FileExistsError(str(self.path))
+            ensure_dir(self.path.parent)
+            base = asdict(cfg)
+            atomic_write_text(self.path, json.dumps(base, indent=2), encoding="utf-8")
+
+
+class GlobalConfigStore:
+    def __init__(self, path: Path, lock_path: Path):
+        self.path = path
+        self.lock_path = lock_path
+        self._extra: Dict[str, Any] = {}
+
+    def load(self) -> GlobalConfigLoadResult:
+        cfg = GlobalConfig()
+        migrated = False
+        warnings: List[str] = []
+
+        if not self.path.exists():
+            migrated = True
+            return GlobalConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
+
+        try:
+            raw = self.path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError("Global config root is not a JSON object")
+        except Exception as e:
+            try:
+                bad = self.path.with_name(f"global.corrupt.{now_ts()}.json")
+                shutil.copy2(self.path, bad)
+                warnings.append(f"Global config was corrupt -> copied to: {bad}")
+            except Exception:
+                warnings.append("Global config was corrupt -> could not copy quarantine file")
+            migrated = True
+            return GlobalConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
+
+        known = {"schema_version", "steamcmd_dir", "last_selected_server_id", "servers"}
+        self._extra = {k: v for k, v in data.items() if k not in known}
+
+        cfg.schema_version = safe_int(data.get("schema_version", cfg.schema_version), cfg.schema_version)
+        cfg.steamcmd_dir = str(data.get("steamcmd_dir") or cfg.steamcmd_dir)
+        cfg.last_selected_server_id = str(data.get("last_selected_server_id") or "")
+
+        servers_raw = data.get("servers")
+        if isinstance(servers_raw, list):
+            for item in servers_raw:
+                if not isinstance(item, dict):
+                    continue
+                sid = str(item.get("id") or "").strip()
+                sdir = str(item.get("server_dir") or "").strip()
+                if not sid or not sdir:
+                    continue
+                name = str(item.get("display_name") or sid).strip()
+                cfg.servers.append(ServerRef(id=sid, display_name=name, server_dir=sdir))
+        else:
+            migrated = True
+
+        if cfg.schema_version != GlobalConfig().schema_version:
+            cfg.schema_version = GlobalConfig().schema_version
+            migrated = True
+
+        return GlobalConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
+
+    def save(self, cfg: GlobalConfig) -> None:
+        with exclusive_file_lock(self.lock_path):
+            ensure_dir(self.path.parent)
+            base = asdict(cfg)
+            for k, v in self._extra.items():
+                if k not in base:
+                    base[k] = v
+            if self.path.exists():
+                try:
+                    bak = self.path.with_name(f"global.bak.{now_ts()}.json")
+                    shutil.copy2(self.path, bak)
+                except Exception:
+                    pass
+            atomic_write_text(self.path, json.dumps(base, indent=2), encoding="utf-8")
 
 # =============================================================================
 # DEPENDENCIES
@@ -891,7 +1249,7 @@ def ensure_steamcmd(steamcmd_root: str, logger: logging.Logger) -> Path:
         if code in (0, 7, 8):
             # SteamCMD can return 7/8 during first bootstrap/self-update; treat as OK.
             if code != 0:
-                logger.warning("[SteamCMD] boot returned exit=%s (bootstrap/self-update). Retry %s/3", code, attempt)
+                logger.warning("[SteamCMD] boot returned exit=%s (bootstrap/self-update).", code)
             return exe
         logger.warning("[SteamCMD] steamcmd.exe exists but boot returned code=%s -> reinstalling", code)
 
@@ -1257,26 +1615,21 @@ class IniStagePaths:
     stage_meta: Path
 
 
-def staging_paths(app_base: Path, server_dir: Path) -> Tuple[Path, Path]:
-    staging_root = app_base / STAGING_DIR_NAME
-    ensure_dir(staging_root)
-    key = server_key_from_dir(server_dir)
-    root = staging_root / key
+def staging_paths(app_base: Path, server_id: str) -> Tuple[Path, Path]:
+    root = server_root(app_base, server_id) / STAGING_DIR_NAME
     ensure_dir(root)
     return root / "GameUserSettings.ini", root / "Game.ini"
 
 
-def ini_stage_paths(app_base: Path, server_dir: Path, target: str) -> IniStagePaths:
-    key = server_key_from_dir(server_dir)
-
+def ini_stage_paths(app_base: Path, server_id: str, server_dir: Path, target: str) -> IniStagePaths:
     live_gus = server_dir / GAMEUSERSETTINGS_REL
     live_game = server_dir / GAME_INI_REL
 
-    baseline_root = app_base / BASELINE_DIR_NAME / key
+    baseline_root = server_root(app_base, server_id) / BASELINE_DIR_NAME
     baseline_gus = baseline_root / "GameUserSettings.ini"
     baseline_game = baseline_root / "Game.ini"
 
-    stage_gus, stage_game = staging_paths(app_base, server_dir)
+    stage_gus, stage_game = staging_paths(app_base, server_id)
 
     if target == "gus":
         stage = stage_gus
@@ -1546,6 +1899,488 @@ def get_rcon_client_factory() -> Callable[[str, int, str, float], Any]:
         return lambda h, p, pw, t: BuiltinRCONClient(h, p, pw, t)
 
 # =============================================================================
+# DISCORD NOTIFICATIONS
+# =============================================================================
+
+def utc_now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+class DiscordWebhookClient:
+    def __init__(self, webhook_url: str, logger: logging.Logger, timeout: float = 8.0):
+        self.webhook_url = webhook_url.strip()
+        self.logger = logger
+        self.timeout = timeout
+
+    def post(self, payload: Dict[str, Any]) -> None:
+        if not self.webhook_url:
+            self.logger.info("[Discord] Webhook URL missing; send skipped.")
+            return
+
+        data = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json", "User-Agent": "ARK-ASA-Manager/1.0"}
+
+        def send_once() -> int:
+            req = Request(self.webhook_url, data=data, headers=headers, method="POST")
+            with urlopen(req, timeout=self.timeout) as resp:
+                return int(getattr(resp, "status", resp.getcode()))
+
+        try:
+            status = send_once()
+            if status in (200, 204):
+                return
+            self.logger.info(f"[Discord] Webhook returned status {status}")
+        except HTTPError as e:
+            if int(getattr(e, "code", 0)) == 429:
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                try:
+                    delay = float(retry_after) if retry_after else 0.0
+                except Exception:
+                    delay = 0.0
+                if delay > 0:
+                    self.logger.info(f"[Discord] Rate limited. Retrying in {delay:.1f}s.")
+                    time.sleep(delay)
+                try:
+                    status = send_once()
+                    if status not in (200, 204):
+                        self.logger.info(f"[Discord] Webhook returned status {status} after retry.")
+                except Exception as retry_err:
+                    self.logger.info(f"[Discord] Webhook retry failed: {retry_err}")
+            else:
+                self.logger.info(f"[Discord] Webhook error: {e}")
+        except Exception as e:
+            self.logger.info(f"[Discord] Webhook error: {e}")
+
+
+class PlayerListProvider:
+    def __init__(self, rcon_fn: Callable[[str, float], str], logger: logging.Logger):
+        self.rcon_fn = rcon_fn
+        self.logger = logger
+        self._patterns = [
+            re.compile(r"^\s*\d+\.\s*(?P<name>.+?)[,;]\s*(?P<id>\d{6,20})\s*$"),
+            re.compile(r"^\s*(?P<id>\d{6,20})\s*[,;]\s*(?P<name>.+?)\s*$"),
+            re.compile(r"^\s*(?P<name>.+?)\s*[,;]\s*(?P<id>\d{6,20})\b.*$"),
+        ]
+
+    def get_players(self) -> Dict[str, Dict[str, str]]:
+        raw = self.rcon_fn("ListPlayers", 6.0)
+        if not raw:
+            return {}
+
+        players: Dict[str, Dict[str, str]] = {}
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        for line in lines:
+            if line.lower().startswith("player") and "count" in line.lower():
+                continue
+            if "no players" in line.lower():
+                continue
+
+            cleaned = re.sub(r"^\s*\d+\.\s*", "", line).strip()
+            name = ""
+            player_id = ""
+            for pat in self._patterns:
+                m = pat.match(cleaned)
+                if m:
+                    name = m.group("name").strip()
+                    player_id = m.group("id").strip()
+                    break
+
+            if not player_id:
+                m = re.search(r"\d{6,20}", cleaned)
+                if m:
+                    player_id = m.group(0)
+                    name = cleaned.replace(player_id, "").strip(" ,;-")
+
+            if not name:
+                name = cleaned
+
+            if player_id:
+                key = player_id
+            else:
+                key = hashlib.sha1(name.encode("utf-8", errors="ignore")).hexdigest()
+
+            players[key] = {"name": name, "id": player_id, "raw": line}
+
+        return players
+
+
+class DiscordStateStore:
+    def __init__(self, state_path: Path, logger: logging.Logger):
+        self.path = state_path
+        self.logger = logger
+
+    def load(self) -> Dict[str, Any]:
+        if not self.path.exists():
+            return {}
+        try:
+            raw = self.path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            self.logger.info(f"[Discord] Failed to read state: {e}")
+            return {}
+
+    def save(self, state: Dict[str, Any]) -> None:
+        try:
+            ensure_dir(self.path.parent)
+            atomic_write_text(self.path, json.dumps(state, indent=2), encoding="utf-8")
+        except Exception as e:
+            self.logger.info(f"[Discord] Failed to save state: {e}")
+
+
+class DiscordNotificationCoordinator:
+    ERROR_THROTTLE_SEC = 3600
+
+    def __init__(self, state_path: Path, server_id: str, logger: logging.Logger, rcon_fn: Callable[[str, float], str]):
+        self.server_id = server_id
+        self.logger = logger
+        self.state_store = DiscordStateStore(state_path, logger)
+        self.player_provider = PlayerListProvider(rcon_fn, logger)
+        self._cfg: Optional[AppConfig] = None
+        self._webhook: Optional[DiscordWebhookClient] = None
+        self._state_lock = threading.Lock()
+        self._poll_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._server_instance_id: Optional[str] = None
+        self._stop_requested = False
+
+    def update_config(self, cfg: AppConfig) -> None:
+        self._cfg = cfg
+        if cfg.discord_enable and cfg.discord_webhook_url.strip():
+            self._webhook = DiscordWebhookClient(cfg.discord_webhook_url, self.logger, timeout=8.0)
+        else:
+            self._webhook = None
+
+    @property
+    def state_dir(self) -> Path:
+        return self.state_store.path.parent
+
+    def request_stop(self) -> None:
+        self._stop_requested = True
+
+    def start_instance(self, cfg: AppConfig, pid: int) -> None:
+        self.update_config(cfg)
+        instance_id = f"{utc_now_iso()}_pid{pid}"
+        self._server_instance_id = instance_id
+        self._stop_requested = False
+        with self._state_lock:
+            state = self.state_store.load()
+            state["server_instance_id"] = instance_id
+            state["server_started_ts"] = time.time()
+            self.state_store.save(state)
+        self._notify_start(cfg)
+
+    def notify_stop(self, cfg: AppConfig, requested: bool, exit_code: Optional[int] = None) -> None:
+        self.update_config(cfg)
+        if requested:
+            self._notify_stop(cfg)
+        else:
+            if self._stop_requested:
+                return
+            self._notify_crash(cfg, exit_code)
+
+    def start_polling(self, cfg: AppConfig) -> None:
+        self.update_config(cfg)
+        if self._poll_thread and self._poll_thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._poll_thread.start()
+
+    def stop_polling(self) -> None:
+        self._stop_event.set()
+
+    def send_test(self, cfg: AppConfig) -> None:
+        self.update_config(cfg)
+        if not self._webhook:
+            self.logger.info("[Discord] Webhook not configured; test skipped.")
+            return
+        payload = {
+            "embeds": [
+                {
+                    "title": "🔔 Discord webhook test",
+                    "description": "The ARK ASA Server Manager webhook is configured correctly.",
+                    "color": 0x3498DB,
+                    "timestamp": utc_now_iso(),
+                    "footer": {"text": "ARK ASA Server Manager"},
+                }
+            ]
+        }
+        self._webhook.post(payload)
+
+    def _poll_loop(self) -> None:
+        while not self._stop_event.is_set():
+            cfg = self._cfg
+            if cfg:
+                interval = max(60, int(cfg.discord_poll_interval_sec))
+                self._poll_once(cfg)
+            else:
+                interval = 60
+
+            deadline = time.time() + interval
+            while time.time() < deadline:
+                if self._stop_event.is_set():
+                    return
+                time.sleep(1)
+
+    def _poll_once(self, cfg: AppConfig) -> None:
+        if not cfg.discord_enable:
+            return
+        if not cfg.enable_rcon:
+            return
+        if not self._webhook:
+            return
+
+        try:
+            current = self.player_provider.get_players()
+        except Exception as e:
+            self.logger.info(f"[Discord] RCON ListPlayers failed: {e}")
+            self._maybe_notify_error(cfg, e)
+            return
+
+        with self._state_lock:
+            state = self.state_store.load()
+            previous = state.get("last_players", {})
+            if not isinstance(previous, dict):
+                previous = {}
+
+            current_ids = set(current.keys())
+            previous_ids = set(previous.keys())
+            joined_ids = current_ids - previous_ids
+            left_ids = previous_ids - current_ids
+
+            if cfg.discord_notify_join and joined_ids:
+                self._notify_player_change(cfg, current, joined_ids, joined=True)
+            if cfg.discord_notify_leave and left_ids:
+                self._notify_player_change(cfg, previous, left_ids, joined=False)
+
+            state["last_players"] = current
+            state["last_error_hash"] = ""
+            state["last_error_notify_ts"] = 0
+            self.state_store.save(state)
+
+    def _load_mention_map(self, cfg: AppConfig) -> Dict[str, str]:
+        raw = (cfg.discord_mention_map_json or "").strip()
+        if not raw:
+            return {}
+
+        data: Dict[str, str] = {}
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                data = {str(k): str(v) for k, v in parsed.items()}
+                return data
+        except Exception:
+            pass
+
+        try:
+            path = Path(raw)
+            if path.exists() and path.is_file():
+                parsed = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(parsed, dict):
+                    data = {str(k): str(v) for k, v in parsed.items()}
+        except Exception as e:
+            self.logger.info(f"[Discord] Failed to load mention map: {e}")
+
+        return data
+
+    def _format_player_mention(self, cfg: AppConfig, player: Dict[str, str], mapping: Optional[Dict[str, str]] = None) -> str:
+        name = player.get("name") or "Unknown"
+        mode = (cfg.discord_mention_mode or "name").strip().lower()
+        if mode == "none":
+            return name
+        if mode == "mapping":
+            mapping = mapping if mapping is not None else self._load_mention_map(cfg)
+            key = player.get("id") or ""
+            target = mapping.get(key) if key else None
+            if not target:
+                target = mapping.get(name)
+            if target:
+                return f"<@{target}>"
+        return f"**{name}**"
+
+    def _server_context_fields(self, cfg: AppConfig) -> List[Dict[str, Any]]:
+        mods = cfg.normalized_mods()
+        mods_display = mods.split(",") if mods else []
+        if len(mods_display) > 5:
+            mods_display = mods_display[:5] + ["..."]
+
+        return [
+            {"name": "Server", "value": cfg.server_name or "default", "inline": True},
+            {"name": "Map", "value": cfg.map_name or DEFAULT_MAP, "inline": True},
+            {"name": "IP/Port", "value": f"{cfg.rcon_host}:{cfg.port}", "inline": True},
+            {"name": "Query Port", "value": str(cfg.query_port), "inline": True},
+            {"name": "Max Players", "value": str(cfg.max_players), "inline": True},
+            {"name": "Mods", "value": ", ".join(mods_display) if mods_display else "None", "inline": False},
+        ]
+
+    def _notify_start(self, cfg: AppConfig) -> None:
+        if not cfg.discord_notify_start or not self._webhook:
+            return
+        if not self._server_instance_id:
+            return
+
+        with self._state_lock:
+            state = self.state_store.load()
+            if state.get("last_start_sent_instance") == self._server_instance_id:
+                return
+            state["last_start_sent_instance"] = self._server_instance_id
+            self.state_store.save(state)
+
+        payload = {
+            "embeds": [
+                {
+                    "title": "🟢 Server started",
+                    "description": f"{cfg.server_name or 'default'} is now online.",
+                    "color": 0x2ECC71,
+                    "fields": self._server_context_fields(cfg),
+                    "timestamp": utc_now_iso(),
+                    "footer": {"text": "ARK ASA Server Manager"},
+                }
+            ]
+        }
+        self._webhook.post(payload)
+
+    def _notify_stop(self, cfg: AppConfig) -> None:
+        if not cfg.discord_notify_stop or not self._webhook:
+            return
+        if not self._server_instance_id:
+            return
+
+        with self._state_lock:
+            state = self.state_store.load()
+            if state.get("last_stop_sent_instance") == self._server_instance_id:
+                return
+            state["last_stop_sent_instance"] = self._server_instance_id
+            self.state_store.save(state)
+
+        payload = {
+            "embeds": [
+                {
+                    "title": "🛑 Server stopped",
+                    "description": f"{cfg.server_name or 'default'} has been stopped.",
+                    "color": 0xE74C3C,
+                    "fields": self._stop_fields(state),
+                    "timestamp": utc_now_iso(),
+                    "footer": {"text": "ARK ASA Server Manager"},
+                }
+            ]
+        }
+        self._webhook.post(payload)
+
+    def _notify_crash(self, cfg: AppConfig, exit_code: Optional[int]) -> None:
+        if not cfg.discord_notify_crash or not self._webhook:
+            return
+        if not self._server_instance_id:
+            return
+
+        with self._state_lock:
+            state = self.state_store.load()
+            if state.get("last_crash_sent_instance") == self._server_instance_id:
+                return
+            state["last_crash_sent_instance"] = self._server_instance_id
+            self.state_store.save(state)
+
+        fields = self._stop_fields(state)
+        if exit_code is not None:
+            fields.append({"name": "Exit Code", "value": str(exit_code), "inline": True})
+
+        payload = {
+            "embeds": [
+                {
+                    "title": "💥 Server exited",
+                    "description": f"{cfg.server_name or 'default'} exited unexpectedly.",
+                    "color": 0xF39C12,
+                    "fields": fields,
+                    "timestamp": utc_now_iso(),
+                    "footer": {"text": "ARK ASA Server Manager"},
+                }
+            ]
+        }
+        self._webhook.post(payload)
+
+    def _stop_fields(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
+        fields: List[Dict[str, Any]] = []
+        started = state.get("server_started_ts")
+        if isinstance(started, (int, float)):
+            uptime = max(0, int(time.time() - float(started)))
+            fields.append({"name": "Uptime", "value": format_duration(uptime), "inline": True})
+        return fields
+
+    def _notify_player_change(
+        self,
+        cfg: AppConfig,
+        player_data: Dict[str, Dict[str, str]],
+        player_ids: set,
+        joined: bool,
+    ) -> None:
+        if not self._webhook:
+            return
+        title = "✅ Player joined" if joined else "👋 Player left"
+        color = 0x2ECC71 if joined else 0x95A5A6
+
+        mapping = self._load_mention_map(cfg) if cfg.discord_mention_mode == "mapping" else None
+        mentions = [self._format_player_mention(cfg, player_data[player_id], mapping) for player_id in player_ids]
+        online_now = len(player_data) if joined else max(0, len(player_data) - len(player_ids))
+
+        if len(mentions) > 5:
+            description = "\n".join(mentions)
+            embed = {
+                "title": title,
+                "description": description,
+                "color": color,
+                "fields": [{"name": "Online now", "value": str(online_now), "inline": True}],
+                "timestamp": utc_now_iso(),
+                "footer": {"text": "ARK ASA Server Manager"},
+            }
+            self._webhook.post({"embeds": [embed]})
+            return
+
+        for player_id in player_ids:
+            player = player_data[player_id]
+            mention = self._format_player_mention(cfg, player, mapping)
+            fields = [{"name": "Online now", "value": str(online_now), "inline": True}]
+            if player.get("id"):
+                fields.append({"name": "Player ID", "value": player["id"], "inline": True})
+            embed = {
+                "title": title,
+                "description": f"{mention} {'joined' if joined else 'left'} the server.",
+                "color": color,
+                "fields": fields,
+                "timestamp": utc_now_iso(),
+                "footer": {"text": "ARK ASA Server Manager"},
+            }
+            self._webhook.post({"embeds": [embed]})
+
+    def _maybe_notify_error(self, cfg: AppConfig, error: Exception) -> None:
+        if not self._webhook:
+            return
+        err_hash = hashlib.sha1(str(error).encode("utf-8", errors="ignore")).hexdigest()
+        now = time.time()
+        with self._state_lock:
+            state = self.state_store.load()
+            last_hash = state.get("last_error_hash", "")
+            last_ts = state.get("last_error_notify_ts", 0)
+            if err_hash == last_hash and isinstance(last_ts, (int, float)) and now - float(last_ts) < self.ERROR_THROTTLE_SEC:
+                return
+            state["last_error_hash"] = err_hash
+            state["last_error_notify_ts"] = now
+            self.state_store.save(state)
+
+        payload = {
+            "embeds": [
+                {
+                    "title": "⚠️ RCON polling error",
+                    "description": str(error),
+                    "color": 0xE67E22,
+                    "timestamp": utc_now_iso(),
+                    "footer": {"text": "ARK ASA Server Manager"},
+                }
+            ]
+        }
+        self._webhook.post(payload)
+
+# =============================================================================
 # SERVER OPS
 # =============================================================================
 
@@ -1559,6 +2394,17 @@ def server_saved_dir(server_dir: Path) -> Path:
 
 def server_config_dir(server_dir: Path) -> Path:
     return server_dir / "ShooterGame" / "Saved" / "Config" / "WindowsServer"
+
+
+def split_custom_start_args(raw: str) -> List[str]:
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return []
+    try:
+        parts = shlex.split(cleaned, posix=False)
+    except ValueError:
+        parts = cleaned.split()
+    return [p for p in parts if p]
 
 
 def build_server_command(cfg: AppConfig) -> List[str]:
@@ -1647,18 +2493,16 @@ def build_server_command(cfg: AppConfig) -> List[str]:
     if cfg.mech_ignoredupeditems:
         flags.append("-ignoredupeditems")
 
+    flags.extend(split_custom_start_args(cfg.custom_start_args))
+
     return [str(exe), url, *flags]
 
 # =============================================================================
 # BASELINE / STAGING APPLY
 # =============================================================================
 
-def ensure_baseline(app_base: Path, server_dir: Path, logger: logging.Logger, refresh: bool = True) -> Path:
-    baseline_root = app_base / BASELINE_DIR_NAME
-    ensure_dir(baseline_root)
-
-    key = server_key_from_dir(server_dir)
-    base = baseline_root / key
+def ensure_baseline(app_base: Path, server_id: str, server_dir: Path, logger: logging.Logger, refresh: bool = True) -> Path:
+    base = server_root(app_base, server_id) / BASELINE_DIR_NAME
     ensure_dir(base)
 
     src_gus = server_dir / GAMEUSERSETTINGS_REL
@@ -1677,8 +2521,8 @@ def ensure_baseline(app_base: Path, server_dir: Path, logger: logging.Logger, re
     return base
 
 
-def apply_staging_to_server(app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
-    stage_gus, stage_game = staging_paths(app_base, server_dir)
+def apply_staging_to_server(app_base: Path, server_id: str, server_dir: Path, logger: logging.Logger) -> None:
+    stage_gus, stage_game = staging_paths(app_base, server_id)
     dest_gus = server_dir / GAMEUSERSETTINGS_REL
     dest_game = server_dir / GAME_INI_REL
 
@@ -1693,8 +2537,8 @@ def apply_staging_to_server(app_base: Path, server_dir: Path, logger: logging.Lo
         logger.info("Applied staging: Game.ini")
 
 
-def restore_baseline_to_server(app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
-    base_root = app_base / BASELINE_DIR_NAME / server_key_from_dir(server_dir)
+def restore_baseline_to_server(app_base: Path, server_id: str, server_dir: Path, logger: logging.Logger) -> None:
+    base_root = server_root(app_base, server_id) / BASELINE_DIR_NAME
     src_gus = base_root / "GameUserSettings.ini"
     src_game = base_root / "Game.ini"
 
@@ -1712,11 +2556,17 @@ def restore_baseline_to_server(app_base: Path, server_dir: Path, logger: logging
         logger.info("Restored baseline: Game.ini")
 
 
-def ensure_required_server_settings(cfg: AppConfig, app_base: Path, server_dir: Path, logger: logging.Logger) -> None:
+def ensure_required_server_settings(
+    cfg: AppConfig,
+    app_base: Path,
+    server_id: str,
+    server_dir: Path,
+    logger: logging.Logger,
+) -> None:
     ensure_dir((server_dir / GAMEUSERSETTINGS_REL).parent)
 
     # Stage GUS
-    paths_gus = ini_stage_paths(app_base, server_dir, "gus")
+    paths_gus = ini_stage_paths(app_base, server_id, server_dir, "gus")
     ensure_ini_staging_synced(paths_gus, server_running=False, logger=logger)
     doc_gus = read_ini(paths_gus.stage)
 
@@ -1740,7 +2590,7 @@ def ensure_required_server_settings(cfg: AppConfig, app_base: Path, server_dir: 
     logger.info("Staged GameUserSettings.ini (Admin/Join/RCON/SessionName/MaxPlayers).")
 
     # Stage Game.ini (critical for MaxPlayers)
-    paths_game = ini_stage_paths(app_base, server_dir, "game")
+    paths_game = ini_stage_paths(app_base, server_id, server_dir, "game")
     ensure_ini_staging_synced(paths_game, server_running=False, logger=logger)
     doc_game = read_ini(paths_game.stage)
 
@@ -1858,26 +2708,28 @@ def build_logger(log_dir: Path, text_widget: tk.Text) -> Tuple[logging.Logger, T
 # =============================================================================
 
 class ServerManagerApp:
-    @staticmethod
-    def static_app_base() -> Path:
-        base = resolve_storage_root()
-        ensure_dir(base)
-        return base
-
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, app_base: Path):
         self.root = root
         self.root.title(APP_NAME)
-        self.root.minsize(1220, 780)
+        apply_min_window_size(self.root, 1220, 780)
 
-        self.app_base = self.static_app_base()
-        self.config_path = self.app_base / "config.json"
+        self.app_base = app_base
+        self.global_config_path = self.app_base / GLOBAL_CONFIG_NAME
         self.log_dir = self.app_base / LOG_DIR_NAME
 
-        self.store = ConfigStore(self.config_path)
-        load_res = self.store.load()
-        self.cfg = load_res.cfg
-        self._config_migrated = load_res.migrated
-        self._config_warnings = load_res.warnings
+        self.global_store = GlobalConfigStore(self.global_config_path, global_lock_path(self.app_base))
+        global_res = self.global_store.load()
+        self.global_cfg = global_res.cfg
+        self._global_migrated = global_res.migrated
+        self._global_warnings = global_res.warnings
+
+        self.active_server_id: str = ""
+        self.server_store: Optional[ServerConfigStore] = None
+        self.cfg = AppConfig()
+        self._server_migrated = False
+        self._server_warnings: List[str] = []
+
+        self._initialize_profiles()
 
         self._busy = False
         self._busy_lock = threading.Lock()
@@ -1903,6 +2755,9 @@ class ServerManagerApp:
         self._runtime_rcon_port: Optional[int] = None
         self._runtime_rcon_password: Optional[str] = None
 
+        self._discord_coordinator: Optional[DiscordNotificationCoordinator] = None
+        self._discord_server_id: Optional[str] = None
+
         # Console noise filter state (GUI only)
         self._suppress_ga_console: bool = True
 
@@ -1914,8 +2769,13 @@ class ServerManagerApp:
         self._ini_selected_line_idx: Optional[int] = None
         self._ini_paths_current: Optional[IniStagePaths] = None
 
+        self._server_id_order: List[str] = []
+
         self._init_vars()
         self._build_layout()
+        self._apply_text_theme()
+        self.root.after(0, self._apply_text_theme)
+        self._refresh_server_selector(self.active_server_id)
 
         self.logger, self._gui_log_handler = build_logger(self.log_dir, self.txt_log)
         self._gui_log_handler.set_drop_predicate(self._drop_console_message)
@@ -1926,16 +2786,25 @@ class ServerManagerApp:
         if shared:
             ensure_programdata_acl(shared, self.logger)
 
-        for w in self._config_warnings:
+        for w in self._global_warnings:
             self.logger.info(f"[CONFIG] {w}")
-        if self._config_migrated:
+        for w in self._server_warnings:
+            self.logger.info(f"[CONFIG] {w}")
+        if self._global_migrated:
             try:
-                self.store.save(self.cfg)
-                self.logger.info("[CONFIG] Migrated/initialized config saved.")
+                self.global_store.save(self.global_cfg)
+                self.logger.info("[CONFIG] Migrated/initialized global config saved.")
             except Exception as e:
-                self.logger.info(f"[CONFIG] Save after migration failed: {e}")
+                self.logger.info(f"[CONFIG] Save after global migration failed: {e}")
+        if self._server_migrated and self.server_store:
+            try:
+                self.server_store.save(self.cfg)
+                self.logger.info("[CONFIG] Migrated/initialized server config saved.")
+            except Exception as e:
+                self.logger.info(f"[CONFIG] Save after server migration failed: {e}")
 
         self._autosave_guard = True
+        self._apply_global_cfg_to_vars(self.global_cfg)
         self._apply_cfg_to_vars(self.cfg)
         self._autosave_guard = False
 
@@ -1943,6 +2812,438 @@ class ServerManagerApp:
         self._hook_autosave()
         self._refresh_buttons()
         self._sync_auto_update_scheduler()
+
+    # ---------------------------------------------------------------------
+    # Profile / config init
+    # ---------------------------------------------------------------------
+    def _initialize_profiles(self) -> None:
+        legacy_path = self.app_base / LEGACY_CONFIG_NAME
+        if not self.global_config_path.exists() and legacy_path.exists():
+            self._migrate_legacy_config(legacy_path)
+            return
+
+        if not self.global_cfg.servers:
+            self._create_default_server_profile()
+            return
+
+        self._select_active_server_from_global()
+
+    def _migrate_legacy_config(self, legacy_path: Path) -> None:
+        try:
+            raw = json.loads(legacy_path.read_text(encoding="utf-8"))
+        except Exception:
+            raw = {}
+
+        steamcmd_dir = str(raw.get("steamcmd_dir") or DEFAULT_STEAMCMD_DIR) if isinstance(raw, dict) else DEFAULT_STEAMCMD_DIR
+
+        legacy_store = ServerConfigStore(legacy_path, self.app_base / LOCKS_DIR_NAME / "legacy.lock")
+        legacy_res = legacy_store.load()
+        self._server_warnings.extend(legacy_res.warnings)
+
+        server_cfg = legacy_res.cfg
+        server_id = str(uuid.uuid4())
+        server_dir = server_cfg.server_dir or DEFAULT_SERVER_DIR
+        display_name = server_cfg.server_name or "Server 1"
+
+        server_ref = ServerRef(id=server_id, display_name=display_name, server_dir=server_dir)
+        self.global_cfg = GlobalConfig(
+            steamcmd_dir=steamcmd_dir,
+            last_selected_server_id=server_id,
+            servers=[server_ref],
+        )
+        self._global_migrated = True
+
+        server_cfg.server_dir = server_dir
+        server_store = ServerConfigStore(server_config_path(self.app_base, server_id), server_lock_path(self.app_base, server_id))
+        try:
+            server_store.save_new(server_cfg)
+            self._server_migrated = True
+        except FileExistsError:
+            existing = server_store.load()
+            server_cfg = existing.cfg
+            self._server_migrated = existing.migrated
+            self._server_warnings.extend(existing.warnings)
+
+        self.server_store = server_store
+        self.cfg = server_cfg
+        self.active_server_id = server_id
+
+    def _create_default_server_profile(self) -> None:
+        server_id = str(uuid.uuid4())
+        cfg = AppConfig()
+        server_ref = ServerRef(id=server_id, display_name="Server 1", server_dir=cfg.server_dir)
+        self.global_cfg.servers.append(server_ref)
+        self.global_cfg.last_selected_server_id = server_id
+        self._global_migrated = True
+
+        self.server_store = ServerConfigStore(server_config_path(self.app_base, server_id), server_lock_path(self.app_base, server_id))
+        try:
+            self.server_store.save_new(cfg)
+            self._server_migrated = True
+        except FileExistsError:
+            pass
+        self.cfg = cfg
+        self.active_server_id = server_id
+
+    def _select_active_server_from_global(self) -> None:
+        server_ids = [ref.id for ref in self.global_cfg.servers]
+        if not server_ids:
+            self._create_default_server_profile()
+            return
+
+        selected = self.global_cfg.last_selected_server_id
+        if selected not in server_ids:
+            selected = server_ids[0]
+            self.global_cfg.last_selected_server_id = selected
+            self._global_migrated = True
+
+        self.active_server_id = selected
+        self._load_active_server_config(selected)
+
+    def _load_active_server_config(self, server_id: str) -> None:
+        ref = self._server_ref_by_id(server_id)
+        if not ref:
+            self._create_default_server_profile()
+            return
+
+        store = ServerConfigStore(server_config_path(self.app_base, server_id), server_lock_path(self.app_base, server_id))
+        res = store.load()
+        cfg = res.cfg
+        self._server_migrated = res.migrated
+        self._server_warnings = res.warnings
+
+        if ref.server_dir:
+            cfg.server_dir = ref.server_dir
+        elif cfg.server_dir:
+            ref.server_dir = cfg.server_dir
+            self._global_migrated = True
+
+        self.server_store = store
+        self.cfg = cfg
+
+    def _server_ref_by_id(self, server_id: str) -> Optional[ServerRef]:
+        for ref in self.global_cfg.servers:
+            if ref.id == server_id:
+                return ref
+        return None
+
+    def _server_dir_in_use(self, server_dir: str, exclude_id: Optional[str] = None) -> bool:
+        for ref in self.global_cfg.servers:
+            if exclude_id and ref.id == exclude_id:
+                continue
+            if ref.server_dir.strip().lower() == server_dir.strip().lower():
+                return True
+        return False
+
+    def _udp_port_free(self, port: int, host: str = "0.0.0.0") -> bool:
+        if not (1 <= port <= 65535):
+            return False
+        try:
+            with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM)) as sock:
+                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                else:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+                sock.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+    def _tcp_port_free(self, port: int, host: str = "0.0.0.0") -> bool:
+        if not (1 <= port <= 65535):
+            return False
+        try:
+            with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                else:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+                sock.bind((host, port))
+                sock.listen(1)
+            return True
+        except OSError:
+            return False
+
+    def _read_profile_ports(self, server_id: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        try:
+            cfg_path = server_config_path(self.app_base, server_id)
+            if not cfg_path.exists():
+                return None, None, None
+
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+
+            def _get_int(*keys: str) -> Optional[int]:
+                for key in keys:
+                    value = data.get(key)
+                    if isinstance(value, int):
+                        return value
+                    if isinstance(value, str) and value.isdigit():
+                        return int(value)
+                return None
+
+            game = _get_int("port", "game_port", "gamePort")
+            query = _get_int("query_port", "queryPort")
+            rcon = _get_int("rcon_port", "rconPort")
+            return game, query, rcon
+        except Exception:
+            return None, None, None
+
+    def _collect_used_ports(self, ignore_server_id: Optional[str] = None) -> Set[int]:
+        used: Set[int] = set()
+        for ref in getattr(self.global_cfg, "servers", []):
+            sid = getattr(ref, "id", None)
+            if not sid or sid == ignore_server_id:
+                continue
+            game, query, rcon = self._read_profile_ports(sid)
+            for port in (game, query, rcon):
+                if isinstance(port, int):
+                    used.add(port)
+        return used
+
+    def auto_assign_ports(
+        self,
+        cfg: AppConfig,
+        *,
+        stride: int = 10,
+        max_tries: int = 200,
+        ignore_server_id: Optional[str] = None,
+    ) -> Tuple[int, int, int]:
+        used = self._collect_used_ports(ignore_server_id=ignore_server_id)
+
+        base_game = int(getattr(cfg, "port", 0) or DEFAULT_PORT)
+        base_query = int(getattr(cfg, "query_port", 0) or DEFAULT_QUERY_PORT)
+        base_rcon = int(getattr(cfg, "rcon_port", 0) or DEFAULT_RCON_PORT)
+
+        def _block_ok(game: int, query: int, rcon: int) -> bool:
+            if game in used or query in used or rcon in used:
+                return False
+            if len({game, query, rcon}) != 3:
+                return False
+            if not self._udp_port_free(game):
+                return False
+            if not self._udp_port_free(query):
+                return False
+            if not self._tcp_port_free(rcon):
+                return False
+            return True
+
+        if _block_ok(base_game, base_query, base_rcon):
+            cfg.port = base_game
+            cfg.query_port = base_query
+            cfg.rcon_port = base_rcon
+            return base_game, base_query, base_rcon
+
+        for n in range(1, max_tries + 1):
+            game = base_game + n * stride
+            query = base_query + n * stride
+            rcon = base_rcon + n * stride
+
+            if max(game, query, rcon) > 65535:
+                break
+
+            if _block_ok(game, query, rcon):
+                cfg.port = game
+                cfg.query_port = query
+                cfg.rcon_port = rcon
+                return game, query, rcon
+
+        raise RuntimeError(
+            "No free port block found "
+            f"(base={base_game}/{base_query}/{base_rcon}, stride={stride}, tries={max_tries})."
+        )
+
+    def _save_active_server_config(self, cfg: AppConfig) -> None:
+        if not self.server_store:
+            raise RuntimeError("Server config store not initialized.")
+
+        ref = self._server_ref_by_id(self.active_server_id)
+        if not ref:
+            raise RuntimeError("Active server profile is missing.")
+
+        if self._server_dir_in_use(cfg.server_dir, exclude_id=self.active_server_id):
+            raise ValueError("Server directory is already registered in another profile.")
+
+        self.server_store.save(cfg)
+        if ref and ref.server_dir != cfg.server_dir:
+            ref.server_dir = cfg.server_dir
+            self.global_store.save(self.global_cfg)
+
+    def _save_global_config(self, cfg: Optional[GlobalConfig] = None) -> None:
+        self.global_cfg = cfg or self.global_cfg
+        self.global_store.save(self.global_cfg)
+
+    # ---------------------------------------------------------------------
+    # Profile actions
+    # ---------------------------------------------------------------------
+    def _refresh_server_selector(self, selected_id: Optional[str] = None) -> None:
+        refs = self.global_cfg.servers
+        self._server_id_order = [ref.id for ref in refs]
+        labels = [ref.display_name or ref.id for ref in refs]
+        try:
+            self.cmb_server_profile.configure(values=labels)
+        except Exception:
+            pass
+
+        if not refs:
+            self.var_server_profile.set("")
+            return
+
+        target_id = selected_id or self.active_server_id or refs[0].id
+        if target_id not in self._server_id_order:
+            target_id = refs[0].id
+
+        idx = self._server_id_order.index(target_id)
+        try:
+            self.cmb_server_profile.current(idx)
+        except Exception:
+            self.var_server_profile.set(labels[idx])
+
+    def _on_server_profile_selected(self) -> None:
+        try:
+            idx = self.cmb_server_profile.current()
+        except Exception:
+            return
+        if idx < 0 or idx >= len(getattr(self, "_server_id_order", [])):
+            return
+        server_id = self._server_id_order[idx]
+        self._switch_server_profile(server_id)
+
+    def _switch_server_profile(self, server_id: str) -> None:
+        if server_id == self.active_server_id:
+            return
+        if self._is_server_running():
+            messagebox.showwarning("Server running", "Stop the server before switching profiles.")
+            self._refresh_server_selector(self.active_server_id)
+            return
+
+        try:
+            self.cfg = self._collect_vars_to_cfg()
+            self._save_active_server_config(self.cfg)
+            self.global_cfg = self._collect_vars_to_global_cfg()
+            self._save_global_config(self.global_cfg)
+        except Exception as e:
+            messagebox.showerror("Switch profile", str(e))
+            self._refresh_server_selector(self.active_server_id)
+            return
+
+        self.active_server_id = server_id
+        self.global_cfg.last_selected_server_id = server_id
+        self._save_global_config(self.global_cfg)
+
+        self._load_active_server_config(server_id)
+        self._autosave_guard = True
+        self._apply_cfg_to_vars(self.cfg)
+        self._autosave_guard = False
+        self._sync_map_mode()
+        self._reset_ini_state()
+
+    def _add_server_profile(self) -> None:
+        display_name = simpledialog.askstring("New Server Profile", "Display name:", initialvalue="New Server")
+        if not display_name:
+            return
+
+        new_dir = filedialog.askdirectory(
+            title="Select ARK server install directory for this NEW profile",
+            mustexist=False,
+        )
+        if not new_dir:
+            return
+
+        new_dir = str(Path(new_dir).resolve())
+
+        if self._server_dir_in_use(new_dir):
+            messagebox.showerror(
+                "New Server Profile",
+                "This server install directory is already registered in another profile.\n"
+                "Choose a different folder for each server.",
+            )
+            return
+
+        try:
+            cfg = self._collect_vars_to_cfg()
+        except Exception:
+            cfg = AppConfig()
+
+        cfg.server_dir = new_dir
+        cfg.server_name = display_name.strip() or cfg.server_name or DEFAULT_SERVER_NAME
+
+        try:
+            self.auto_assign_ports(cfg, stride=10, max_tries=300)
+        except Exception as e:
+            messagebox.showerror("New Server Profile", f"Port auto-detection failed: {e}")
+            return
+
+        server_id = str(uuid.uuid4())
+        new_store = ServerConfigStore(server_config_path(self.app_base, server_id), server_lock_path(self.app_base, server_id))
+        try:
+            new_store.save_new(cfg)
+        except FileExistsError:
+            messagebox.showerror("New Server Profile", "Refusing to overwrite an existing server config.")
+            return
+
+        self.global_cfg.servers.append(ServerRef(id=server_id, display_name=display_name.strip(), server_dir=cfg.server_dir))
+        self.global_cfg.last_selected_server_id = server_id
+        self._save_global_config(self.global_cfg)
+
+        self.active_server_id = server_id
+        self.server_store = new_store
+        self.cfg = cfg
+        self._refresh_server_selector(server_id)
+        self._autosave_guard = True
+        self._apply_cfg_to_vars(self.cfg)
+        self._autosave_guard = False
+        self._reset_ini_state()
+
+    def _rename_server_profile(self) -> None:
+        ref = self._server_ref_by_id(self.active_server_id)
+        if not ref:
+            return
+        new_name = simpledialog.askstring("Rename Server Profile", "Display name:", initialvalue=ref.display_name)
+        if not new_name:
+            return
+        ref.display_name = new_name.strip()
+        self._save_global_config(self.global_cfg)
+        self._refresh_server_selector(self.active_server_id)
+
+    def _remove_server_profile(self) -> None:
+        if self._is_server_running():
+            messagebox.showwarning("Remove Profile", "Stop the server before removing a profile.")
+            return
+        if len(self.global_cfg.servers) <= 1:
+            messagebox.showwarning("Remove Profile", "At least one server profile must exist.")
+            return
+        ref = self._server_ref_by_id(self.active_server_id)
+        if not ref:
+            return
+        if not messagebox.askyesno(
+            "Remove Profile",
+            f"Remove profile '{ref.display_name}'?\nFiles on disk will be kept.",
+        ):
+            return
+
+        self.global_cfg.servers = [r for r in self.global_cfg.servers if r.id != ref.id]
+        self.active_server_id = self.global_cfg.servers[0].id
+        self.global_cfg.last_selected_server_id = self.active_server_id
+        self._save_global_config(self.global_cfg)
+
+        self._load_active_server_config(self.active_server_id)
+        self._refresh_server_selector(self.active_server_id)
+        self._autosave_guard = True
+        self._apply_cfg_to_vars(self.cfg)
+        self._autosave_guard = False
+        self._reset_ini_state()
+
+    def _reset_ini_state(self) -> None:
+        self._ini_loaded_target = None
+        self._ini_paths_current = None
+        self._ini_doc = None
+        self._ini_items_index = {}
+        try:
+            self.lbl_ini_target.configure(text="(not loaded)")
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------------
     # Console filter (GUI only)
@@ -1985,11 +3286,70 @@ class ServerManagerApp:
         self._runtime_rcon_password = None
 
     # ---------------------------------------------------------------------
+    # Discord helpers
+    # ---------------------------------------------------------------------
+    def _discord_get_coordinator(self) -> DiscordNotificationCoordinator:
+        server_id = self.active_server_id
+        if not self._discord_coordinator or self._discord_server_id != server_id:
+            self._discord_coordinator = DiscordNotificationCoordinator(
+                server_discord_state_path(self.app_base, server_id),
+                server_id,
+                self.logger,
+                lambda cmd, timeout: self._rcon_try(cmd, timeout=timeout),
+            )
+            self._discord_server_id = server_id
+        self._discord_coordinator.update_config(self.cfg)
+        return self._discord_coordinator
+
+    def _discord_update_config(self) -> None:
+        if self._discord_coordinator:
+            self._discord_coordinator.update_config(self.cfg)
+
+    def _discord_start_notifications(self, pid: int) -> None:
+        if not self.cfg.discord_enable:
+            return
+        coordinator = self._discord_get_coordinator()
+        coordinator.start_instance(self.cfg, pid)
+        coordinator.start_polling(self.cfg)
+
+    def _discord_request_stop(self) -> None:
+        if not self.cfg.discord_enable:
+            return
+        coordinator = self._discord_get_coordinator()
+        coordinator.request_stop()
+
+    def _discord_stop_notifications(self, requested: bool, exit_code: Optional[int] = None) -> None:
+        if not self.cfg.discord_enable:
+            return
+        coordinator = self._discord_get_coordinator()
+        coordinator.notify_stop(self.cfg, requested=requested, exit_code=exit_code)
+        coordinator.stop_polling()
+
+    def _discord_send_test(self) -> None:
+        def job() -> None:
+            self.cfg = self._collect_vars_to_cfg()
+            self._save_active_server_config(self.cfg)
+            coordinator = self._discord_get_coordinator()
+            coordinator.send_test(self.cfg)
+
+        self._run_task("Discord Test", job)
+
+    def _discord_open_state_folder(self) -> None:
+        try:
+            cfg = self._collect_vars_to_cfg()
+        except Exception:
+            cfg = self.cfg
+        server_id = self.active_server_id
+        path = server_discord_state_path(self.app_base, server_id)
+        open_in_explorer(path, select_file=True)
+
+    # ---------------------------------------------------------------------
     # Vars
     # ---------------------------------------------------------------------
     def _init_vars(self) -> None:
         m = self.root
 
+        self.var_server_profile = tk.StringVar(master=m)
         self.var_steamcmd_dir = tk.StringVar(master=m)
         self.var_server_dir = tk.StringVar(master=m)
 
@@ -2014,6 +3374,17 @@ class ServerManagerApp:
         self.var_enable_rcon = tk.BooleanVar(master=m)
         self.var_rcon_host = tk.StringVar(master=m)
         self.var_rcon_port = tk.StringVar(master=m)
+
+        self.var_discord_enable = tk.BooleanVar(master=m)
+        self.var_discord_webhook_url = tk.StringVar(master=m)
+        self.var_discord_poll_interval_min = tk.StringVar(master=m)
+        self.var_discord_notify_start = tk.BooleanVar(master=m)
+        self.var_discord_notify_stop = tk.BooleanVar(master=m)
+        self.var_discord_notify_join = tk.BooleanVar(master=m)
+        self.var_discord_notify_leave = tk.BooleanVar(master=m)
+        self.var_discord_notify_crash = tk.BooleanVar(master=m)
+        self.var_discord_mention_mode = tk.StringVar(master=m)
+        self.var_discord_mention_map_json = tk.StringVar(master=m)
 
         self.var_backup_on_stop = tk.BooleanVar(master=m)
         self.var_backup_dir = tk.StringVar(master=m)
@@ -2054,6 +3425,8 @@ class ServerManagerApp:
         self.var_m_stasiskeepcontrollers = tk.BooleanVar(master=m)
         self.var_m_ignoredupeditems = tk.BooleanVar(master=m)
 
+        self.var_custom_start_args = tk.StringVar(master=m)
+
         self.var_rcon_cmd = tk.StringVar(master=m)
         self.var_rcon_saved = tk.StringVar(master=m)
 
@@ -2072,16 +3445,17 @@ class ServerManagerApp:
     # Layout
     # ---------------------------------------------------------------------
     def _build_layout(self) -> None:
+        theme = THEME_COLORS
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        paned = ttk.PanedWindow(self.root, orient="vertical")
-        paned.grid(row=0, column=0, sticky="nsew")
+        self.paned = ttk.PanedWindow(self.root, orient="vertical")
+        self.paned.grid(row=0, column=0, sticky="nsew")
 
-        top = ttk.Frame(paned, padding=10)
-        bottom = ttk.Frame(paned, padding=10)
-        paned.add(top, weight=4)
-        paned.add(bottom, weight=2)
+        top = ttk.Frame(self.paned, padding=10)
+        bottom = ttk.Frame(self.paned, padding=10)
+        self.paned.add(top, weight=5)
+        self.paned.add(bottom, weight=1)
 
         top.columnconfigure(0, weight=1)
         top.rowconfigure(0, weight=1)
@@ -2092,11 +3466,13 @@ class ServerManagerApp:
         self.tab_server = ttk.Frame(self.nb, padding=10)
         self.tab_adv = ttk.Frame(self.nb, padding=10)
         self.tab_rcon = ttk.Frame(self.nb, padding=10)
+        self.tab_discord = ttk.Frame(self.nb, padding=10)
         self.tab_ini = ttk.Frame(self.nb, padding=10)
 
         self.nb.add(self.tab_server, text="Server")
         self.nb.add(self.tab_adv, text="Advanced Start Args")
         self.nb.add(self.tab_rcon, text="RCON")
+        self.nb.add(self.tab_discord, text="Discord")
         self.nb.add(self.tab_ini, text="INI Editor")
 
         # ---------------- Server tab ----------------
@@ -2105,8 +3481,28 @@ class ServerManagerApp:
 
         vcmd = (self.root.register(self._validate_digits), "%P")
 
+        lf_profiles = ttk.LabelFrame(self.tab_server, text="Server Profiles", padding=10)
+        lf_profiles.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        lf_profiles.columnconfigure(1, weight=1)
+
+        ttk.Label(lf_profiles, text="Active Server").grid(row=0, column=0, sticky="w")
+        self.cmb_server_profile = ttk.Combobox(
+            lf_profiles,
+            textvariable=self.var_server_profile,
+            state="readonly",
+            values=[],
+        )
+        self.cmb_server_profile.grid(row=0, column=1, sticky="ew", padx=6)
+        self.cmb_server_profile.bind("<<ComboboxSelected>>", lambda e: self._on_server_profile_selected())
+
+        profile_actions = ttk.Frame(lf_profiles)
+        profile_actions.grid(row=0, column=2, sticky="e")
+        ttk.Button(profile_actions, text="Add", command=self._add_server_profile).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(profile_actions, text="Rename", command=self._rename_server_profile).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(profile_actions, text="Remove", command=self._remove_server_profile).grid(row=0, column=2)
+
         lf_paths = ttk.LabelFrame(self.tab_server, text="Paths", padding=10)
-        lf_paths.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        lf_paths.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         lf_paths.columnconfigure(1, weight=1)
         lf_paths.columnconfigure(4, weight=1)
 
@@ -2119,11 +3515,11 @@ class ServerManagerApp:
         ttk.Button(lf_paths, text="Browse", command=self._browse_server_dir).grid(row=0, column=5)
 
         lf_server = ttk.LabelFrame(self.tab_server, text="Server Settings", padding=10)
-        lf_server.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        lf_server.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
         lf_server.columnconfigure(1, weight=1)
 
         lf_ops = ttk.LabelFrame(self.tab_server, text="Operations", padding=10)
-        lf_ops.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
+        lf_ops.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
         lf_ops.columnconfigure(1, weight=1)
 
         ttk.Label(lf_server, text="Map Preset").grid(row=0, column=0, sticky="w")
@@ -2163,12 +3559,27 @@ class ServerManagerApp:
         mods_frame.grid(row=8, column=1, sticky="ew", padx=6, pady=(6, 0))
         mods_frame.columnconfigure(0, weight=1)
 
-        self.txt_mods = tk.Text(mods_frame, height=4, wrap="none")
+        self.txt_mods = tk.Text(
+            mods_frame,
+            height=4,
+            wrap="none",
+            background=theme["surface"],
+            foreground=theme["text"],
+            insertbackground=theme["text"],
+            selectbackground=theme["accent_light"],
+            highlightthickness=1,
+            highlightbackground=theme["border"],
+            highlightcolor=theme["accent"],
+        )
         self.txt_mods.grid(row=0, column=0, sticky="ew")
 
         xscroll = ttk.Scrollbar(mods_frame, orient="horizontal", command=self.txt_mods.xview)
         xscroll.grid(row=1, column=0, sticky="ew", pady=(2, 0))
         self.txt_mods.configure(xscrollcommand=xscroll.set)
+
+        ttk.Label(lf_server, text="Custom Server Arguments (optional)").grid(row=9, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(lf_server, textvariable=self.var_custom_start_args).grid(row=9, column=1, sticky="ew", padx=6, pady=(8, 0))
+        ttk.Label(lf_server, text="Example: -Parameter1 -Parameter2").grid(row=10, column=1, sticky="w", padx=6, pady=(2, 0))
 
         ttk.Checkbutton(lf_ops, text="Enable BattlEye", variable=self.var_enable_battleye).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(lf_ops, text="Automanaged Mods", variable=self.var_automanaged_mods).grid(row=1, column=0, sticky="w")
@@ -2211,7 +3622,7 @@ class ServerManagerApp:
         ).grid(row=14, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
         actions = ttk.Frame(self.tab_server, padding=(5, 10))
-        actions.grid(row=2, column=0, columnspan=2, sticky="ew")
+        actions.grid(row=3, column=0, columnspan=2, sticky="ew")
         actions.columnconfigure(9, weight=1)
 
         self.btn_first_install = ttk.Button(actions, text="First Install", command=self.first_install)
@@ -2335,6 +3746,55 @@ class ServerManagerApp:
 
         ttk.Label(self.tab_rcon, text="Responses are written to the shared Console.").grid(row=1, column=0, sticky="w", pady=(8, 0))
 
+        # ---------------- Discord tab ----------------
+        self.tab_discord.columnconfigure(0, weight=1)
+
+        lf_discord = ttk.LabelFrame(self.tab_discord, text="Discord Webhooks", padding=10)
+        lf_discord.grid(row=0, column=0, sticky="ew")
+        lf_discord.columnconfigure(1, weight=1)
+
+        ttk.Checkbutton(lf_discord, text="Enable Discord notifications", variable=self.var_discord_enable).grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+
+        ttk.Label(lf_discord, text="Webhook URL").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(lf_discord, textvariable=self.var_discord_webhook_url).grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
+
+        ttk.Label(lf_discord, text="Poll interval (minutes)").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(lf_discord, textvariable=self.var_discord_poll_interval_min).grid(row=2, column=1, sticky="w", padx=6, pady=(6, 0))
+
+        notify_frame = ttk.LabelFrame(self.tab_discord, text="Notifications", padding=10)
+        notify_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+
+        ttk.Checkbutton(notify_frame, text="Server start", variable=self.var_discord_notify_start).grid(row=0, column=0, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(notify_frame, text="Server stop", variable=self.var_discord_notify_stop).grid(row=0, column=1, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(notify_frame, text="Server crash/exit", variable=self.var_discord_notify_crash).grid(row=0, column=2, sticky="w")
+
+        ttk.Checkbutton(notify_frame, text="Player join", variable=self.var_discord_notify_join).grid(row=1, column=0, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(notify_frame, text="Player leave", variable=self.var_discord_notify_leave).grid(row=1, column=1, sticky="w", padx=(0, 14))
+
+        mention_frame = ttk.LabelFrame(self.tab_discord, text="Mentions", padding=10)
+        mention_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        mention_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(mention_frame, text="Mention mode").grid(row=0, column=0, sticky="w")
+        self.cmb_discord_mention_mode = ttk.Combobox(
+            mention_frame,
+            textvariable=self.var_discord_mention_mode,
+            state="readonly",
+            values=["name", "mapping", "none"],
+            width=14,
+        )
+        self.cmb_discord_mention_mode.grid(row=0, column=1, sticky="w", padx=6)
+
+        ttk.Label(mention_frame, text="Mention map (JSON or file path)").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(mention_frame, textvariable=self.var_discord_mention_map_json).grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
+
+        discord_btns = ttk.Frame(self.tab_discord)
+        discord_btns.grid(row=3, column=0, sticky="w", pady=(10, 0))
+        ttk.Button(discord_btns, text="Send Test", command=self._discord_send_test).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(discord_btns, text="Open State Folder", command=self._discord_open_state_folder).grid(row=0, column=1)
+
         # ---------------- INI Editor tab ----------------
         self.tab_ini.columnconfigure(0, weight=2)
         self.tab_ini.columnconfigure(1, weight=1)
@@ -2442,11 +3902,58 @@ class ServerManagerApp:
         lf_console.columnconfigure(0, weight=1)
         lf_console.rowconfigure(0, weight=1)
 
-        self.txt_log = tk.Text(lf_console, height=12, wrap="word", state="disabled")
+        self.txt_log = tk.Text(
+            lf_console,
+            height=12,
+            wrap="word",
+            state="disabled",
+            background=theme["console_bg"],
+            foreground=theme["console_fg"],
+            insertbackground=theme["console_fg"],
+            selectbackground=theme["console_select"],
+            highlightthickness=1,
+            highlightbackground=theme["border"],
+            highlightcolor=theme["accent"],
+            font=tkfont.nametofont("TkFixedFont"),
+        )
         vs = ttk.Scrollbar(lf_console, orient="vertical", command=self.txt_log.yview)
         self.txt_log.configure(yscrollcommand=vs.set)
         self.txt_log.grid(row=0, column=0, sticky="nsew")
         vs.grid(row=0, column=1, sticky="ns")
+
+        self.root.after(0, self._initialize_paned_layout)
+
+    def _initialize_paned_layout(self) -> None:
+        try:
+            self.root.update_idletasks()
+            height = self.root.winfo_height()
+            if height > 1:
+                self.paned.sashpos(0, int(height * 0.75))
+        except Exception:
+            pass
+
+    def _apply_text_theme(self) -> None:
+        theme = THEME_COLORS
+        self.txt_mods.configure(
+            background=theme["surface"],
+            foreground=theme["text"],
+            insertbackground=theme["text"],
+            selectbackground=theme["accent_light"],
+            highlightthickness=1,
+            highlightbackground=theme["border"],
+            highlightcolor=theme["accent"],
+        )
+        self.txt_log.configure(
+            background=theme["console_bg"],
+            foreground=theme["console_fg"],
+            insertbackground=theme["console_fg"],
+            selectbackground=theme["console_select"],
+            highlightthickness=1,
+            highlightbackground=theme["border"],
+            highlightcolor=theme["accent"],
+            font=tkfont.nametofont("TkFixedFont"),
+        )
+        self.canvas_ticks.configure(background=theme["bg"])
 
     # ---------------------------------------------------------------------
     # Validation
@@ -2473,8 +3980,10 @@ class ServerManagerApp:
                     items.append(t)
         return ",".join(items)
 
-    def _apply_cfg_to_vars(self, cfg: AppConfig) -> None:
+    def _apply_global_cfg_to_vars(self, cfg: GlobalConfig) -> None:
         self.var_steamcmd_dir.set(cfg.steamcmd_dir)
+
+    def _apply_cfg_to_vars(self, cfg: AppConfig) -> None:
         self.var_server_dir.set(cfg.server_dir)
 
         if cfg.map_name in MAP_PRESETS:
@@ -2503,6 +4012,18 @@ class ServerManagerApp:
         self.var_enable_rcon.set(cfg.enable_rcon)
         self.var_rcon_host.set(cfg.rcon_host)
         self.var_rcon_port.set(str(cfg.rcon_port))
+
+        self.var_discord_enable.set(cfg.discord_enable)
+        self.var_discord_webhook_url.set(cfg.discord_webhook_url)
+        poll_min = max(1, int(int(cfg.discord_poll_interval_sec) / 60)) if cfg.discord_poll_interval_sec else 5
+        self.var_discord_poll_interval_min.set(str(poll_min))
+        self.var_discord_notify_start.set(cfg.discord_notify_start)
+        self.var_discord_notify_stop.set(cfg.discord_notify_stop)
+        self.var_discord_notify_join.set(cfg.discord_notify_join)
+        self.var_discord_notify_leave.set(cfg.discord_notify_leave)
+        self.var_discord_notify_crash.set(cfg.discord_notify_crash)
+        self.var_discord_mention_mode.set(cfg.discord_mention_mode or "name")
+        self.var_discord_mention_map_json.set(cfg.discord_mention_map_json)
 
         self.var_backup_on_stop.set(cfg.backup_on_stop)
         self.var_backup_dir.set(cfg.backup_dir)
@@ -2541,13 +4062,13 @@ class ServerManagerApp:
         self.var_m_stasiskeepcontrollers.set(cfg.mech_stasiskeepcontrollers)
         self.var_m_ignoredupeditems.set(cfg.mech_ignoredupeditems)
 
+        self.var_custom_start_args.set(cfg.custom_start_args)
+
         self._rcon_refresh_saved(cfg)
 
     def _collect_vars_to_cfg(self) -> AppConfig:
         cfg = copy.deepcopy(self.cfg) if isinstance(self.cfg, AppConfig) else AppConfig()
         cfg.schema_version = AppConfig().schema_version
-
-        cfg.steamcmd_dir = self.var_steamcmd_dir.get().strip() or DEFAULT_STEAMCMD_DIR
         cfg.server_dir = self.var_server_dir.get().strip() or DEFAULT_SERVER_DIR
 
         cfg.map_name = self.var_map_custom.get().strip() or DEFAULT_MAP
@@ -2572,6 +4093,20 @@ class ServerManagerApp:
         cfg.enable_rcon = bool(self.var_enable_rcon.get())
         cfg.rcon_host = self.var_rcon_host.get().strip() or DEFAULT_RCON_HOST
         cfg.rcon_port = safe_int(self.var_rcon_port.get(), DEFAULT_RCON_PORT) or DEFAULT_RCON_PORT
+
+        cfg.discord_enable = bool(self.var_discord_enable.get())
+        cfg.discord_webhook_url = self.var_discord_webhook_url.get().strip()
+        poll_min = safe_int(self.var_discord_poll_interval_min.get(), 5) or 5
+        cfg.discord_poll_interval_sec = max(60, int(poll_min) * 60)
+        cfg.discord_notify_start = bool(self.var_discord_notify_start.get())
+        cfg.discord_notify_stop = bool(self.var_discord_notify_stop.get())
+        cfg.discord_notify_join = bool(self.var_discord_notify_join.get())
+        cfg.discord_notify_leave = bool(self.var_discord_notify_leave.get())
+        cfg.discord_notify_crash = bool(self.var_discord_notify_crash.get())
+        cfg.discord_mention_mode = (self.var_discord_mention_mode.get() or "name").strip().lower()
+        cfg.discord_mention_map_json = self.var_discord_mention_map_json.get().strip()
+        if cfg.discord_mention_mode not in ("name", "mapping", "none"):
+            cfg.discord_mention_mode = "name"
 
         cfg.backup_on_stop = bool(self.var_backup_on_stop.get())
         cfg.backup_dir = self.var_backup_dir.get().strip()
@@ -2611,15 +4146,22 @@ class ServerManagerApp:
         cfg.mech_stasiskeepcontrollers = bool(self.var_m_stasiskeepcontrollers.get())
         cfg.mech_ignoredupeditems = bool(self.var_m_ignoredupeditems.get())
 
+        cfg.custom_start_args = self.var_custom_start_args.get().strip()
+
         if not isinstance(cfg.rcon_saved_commands, list) or not cfg.rcon_saved_commands:
             cfg.rcon_saved_commands = ["SaveWorld", "DoExit", "ListPlayers", "DestroyWildDinos"]
 
         self._validate_cfg(cfg)
         return cfg
 
+    def _collect_vars_to_global_cfg(self) -> GlobalConfig:
+        cfg = copy.deepcopy(self.global_cfg) if isinstance(self.global_cfg, GlobalConfig) else GlobalConfig()
+        cfg.schema_version = GlobalConfig().schema_version
+        cfg.steamcmd_dir = self.var_steamcmd_dir.get().strip() or DEFAULT_STEAMCMD_DIR
+        self._validate_global_cfg(cfg)
+        return cfg
+
     def _validate_cfg(self, cfg: AppConfig) -> None:
-        if not cfg.steamcmd_dir.strip():
-            raise ValueError("SteamCMD directory is required.")
         if not cfg.server_dir.strip():
             raise ValueError("Server directory is required.")
         if not cfg.map_name.strip():
@@ -2635,6 +4177,10 @@ class ServerManagerApp:
         if cfg.auto_update_interval_min < 10:
             raise ValueError("Auto update interval must be >= 10 minutes.")
 
+    def _validate_global_cfg(self, cfg: GlobalConfig) -> None:
+        if not cfg.steamcmd_dir.strip():
+            raise ValueError("SteamCMD directory is required.")
+
     def _hook_autosave(self) -> None:
         def on_change(*_: Any) -> None:
             if self._autosave_guard:
@@ -2649,6 +4195,10 @@ class ServerManagerApp:
             self.var_join_password, self.var_admin_password,
             self.var_enable_battleye, self.var_automanaged_mods, self.var_validate_on_update,
             self.var_enable_rcon, self.var_rcon_host, self.var_rcon_port,
+            self.var_discord_enable, self.var_discord_webhook_url, self.var_discord_poll_interval_min,
+            self.var_discord_notify_start, self.var_discord_notify_stop, self.var_discord_notify_join,
+            self.var_discord_notify_leave, self.var_discord_notify_crash, self.var_discord_mention_mode,
+            self.var_discord_mention_map_json,
             self.var_backup_on_stop, self.var_backup_dir, self.var_backup_retention, self.var_backup_include_configs,
             self.var_auto_update_restart, self.var_auto_update_interval_min,
             self.var_hide_gameanalytics_console_logs,
@@ -2661,6 +4211,7 @@ class ServerManagerApp:
             self.var_m_unstasisdinoobstructioncheck, self.var_m_alwaystickdedicatedskeletalmeshes,
             self.var_m_disablecharactertracker, self.var_m_useservernetspeedcheck, self.var_m_stasiskeepcontrollers,
             self.var_m_ignoredupeditems,
+            self.var_custom_start_args,
         ]
         for v in vars_to_watch:
             try:
@@ -2689,13 +4240,16 @@ class ServerManagerApp:
             return
         try:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
+            self.global_cfg = self._collect_vars_to_global_cfg()
+            self.global_store.save(self.global_cfg)
             self._set_status("Auto-saved")
         except Exception as e:
             self.logger.info(f"Autosave skipped: {e}")
             self._set_status(f"Config invalid: {e}")
 
         self._sync_auto_update_scheduler()
+        self._discord_update_config()
 
     # ---------------------------------------------------------------------
     # Busy / State
@@ -2765,7 +4319,10 @@ class ServerManagerApp:
         self.var_status.set(text)
 
     def _write_banner(self) -> None:
-        self.logger.info(f"{APP_NAME} started | Admin={is_admin()} | Config={self.config_path}")
+        server_cfg_path = server_config_path(self.app_base, self.active_server_id)
+        self.logger.info(
+            f"{APP_NAME} started | Admin={is_admin()} | GlobalConfig={self.global_config_path} | ServerConfig={server_cfg_path}"
+        )
         self.logger.info(f"Logs: {self.log_dir / LOG_FILE_NAME}")
         self._set_status("Ready")
 
@@ -2835,7 +4392,7 @@ class ServerManagerApp:
     def first_install(self) -> None:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
 
             shared = _programdata_base()
             if shared:
@@ -2847,7 +4404,7 @@ class ServerManagerApp:
             self._ensure_dependencies_first_install(self.logger)
             install_asa_certificates(self.logger)
 
-            steamcmd_exe = ensure_steamcmd(self.cfg.steamcmd_dir, self.logger)
+            steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
 
             steamcmd_app_update(
                 logger=self.logger,
@@ -2855,7 +4412,7 @@ class ServerManagerApp:
                 install_dir=Path(self.cfg.server_dir),
                 app_id=ARK_ASA_APP_ID,
                 validate=False,
-                lock_root=Path(shared or r"C:\ProgramData\ARK-Ascended-Server-Manager"),
+                lock_root=self.app_base,
                 retries=2,
             )
 
@@ -2867,10 +4424,10 @@ class ServerManagerApp:
     def update_validate(self) -> None:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
 
             shared = _programdata_base()
-            steamcmd_exe = ensure_steamcmd(self.cfg.steamcmd_dir, self.logger)
+            steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
 
             steamcmd_app_update(
                 logger=self.logger,
@@ -2878,7 +4435,7 @@ class ServerManagerApp:
                 install_dir=Path(self.cfg.server_dir),
                 app_id=ARK_ASA_APP_ID,
                 validate=True,
-                lock_root=Path(shared or r"C:\ProgramData\ARK-Ascended-Server-Manager"),
+                lock_root=self.app_base,
                 retries=2,
             )
 
@@ -2889,13 +4446,13 @@ class ServerManagerApp:
     # ---------------------------------------------------------------------
     def _stage_required_configs_for_start(self) -> None:
         server_dir = Path(self.cfg.server_dir)
-        ensure_baseline(self.app_base, server_dir, self.logger, refresh=True)
-        ensure_required_server_settings(self.cfg, self.app_base, server_dir, self.logger)
+        ensure_baseline(self.app_base, self.active_server_id, server_dir, self.logger, refresh=True)
+        ensure_required_server_settings(self.cfg, self.app_base, self.active_server_id, server_dir, self.logger)
 
     def start_server(self) -> None:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
 
             server_dir = Path(self.cfg.server_dir)
             exe = ark_server_exe(server_dir)
@@ -2906,7 +4463,7 @@ class ServerManagerApp:
                 raise RuntimeError("Admin/RCON password is empty. Set 'Admin Password (RCON/Admin)' before starting.")
 
             self._stage_required_configs_for_start()
-            apply_staging_to_server(self.app_base, server_dir, self.logger)
+            apply_staging_to_server(self.app_base, self.active_server_id, server_dir, self.logger)
 
             # RCON FIX: capture *runtime* values used to start this server instance
             self._capture_runtime_rcon(self.cfg)
@@ -2930,8 +4487,11 @@ class ServerManagerApp:
                     universal_newlines=True,
                     creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
+                pid = self._server_proc.pid
 
             threading.Thread(target=self._server_log_reader, daemon=True).start()
+            if pid is not None:
+                self._discord_start_notifications(pid)
             self._ui(self._refresh_buttons)
 
         self._run_task("Start Server", job)
@@ -2950,6 +4510,7 @@ class ServerManagerApp:
         except Exception as e:
             self.logger.info(f"Log reader stopped: {e}")
         finally:
+            code: Optional[int] = None
             try:
                 code = p.poll()
                 if code is not None:
@@ -2959,6 +4520,8 @@ class ServerManagerApp:
 
             # RCON FIX: server is gone -> runtime snapshot is no longer valid
             self._clear_runtime_rcon()
+
+            self._discord_stop_notifications(requested=False, exit_code=code)
 
             self._ui(self._refresh_buttons)
 
@@ -3001,7 +4564,7 @@ class ServerManagerApp:
 
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
 
             self.logger.info(f"RCON> {cmd}")
             out = self._rcon_try(cmd, timeout=5.0)
@@ -3009,7 +4572,7 @@ class ServerManagerApp:
 
             if cmd not in self.cfg.rcon_saved_commands:
                 self.cfg.rcon_saved_commands.append(cmd)
-                self.store.save(self.cfg)
+                self._save_active_server_config(self.cfg)
                 self._rcon_refresh_saved(self.cfg)
 
             self.var_rcon_cmd.set("")
@@ -3026,7 +4589,7 @@ class ServerManagerApp:
             return
         if cmd not in self.cfg.rcon_saved_commands:
             self.cfg.rcon_saved_commands.append(cmd)
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
             self._rcon_refresh_saved(self.cfg)
             self.var_rcon_saved.set(cmd)
 
@@ -3036,7 +4599,7 @@ class ServerManagerApp:
             return
         try:
             self.cfg.rcon_saved_commands = [c for c in self.cfg.rcon_saved_commands if c != sel]
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
             self._rcon_refresh_saved(self.cfg)
             self.var_rcon_saved.set("")
         except Exception:
@@ -3092,29 +4655,36 @@ class ServerManagerApp:
         if self.cfg.backup_on_stop:
             backup_server(self.cfg, self.app_base, self.logger)
 
-        restore_baseline_to_server(self.app_base, Path(self.cfg.server_dir), self.logger)
+        restore_baseline_to_server(self.app_base, self.active_server_id, Path(self.cfg.server_dir), self.logger)
         if not inline:
             self._ui(self._refresh_buttons)
 
     def stop_server_safe(self) -> None:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
+            was_running = self._is_server_running()
+            if was_running:
+                self._discord_request_stop()
             self._stop_server_impl(inline=False)
+            if was_running:
+                self._discord_stop_notifications(requested=True)
 
         self._run_task("Stop Server", job)
 
     def update_and_restart_safe(self) -> None:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
 
             if self._is_server_running():
                 self.logger.info("Server running -> performing safe stop before update.")
+                self._discord_request_stop()
                 self._stop_server_impl(inline=True)
+                self._discord_stop_notifications(requested=True)
 
             shared = _programdata_base()
-            steamcmd_exe = ensure_steamcmd(self.cfg.steamcmd_dir, self.logger)
+            steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
 
             steamcmd_app_update(
                 logger=self.logger,
@@ -3122,7 +4692,7 @@ class ServerManagerApp:
                 install_dir=Path(self.cfg.server_dir),
                 app_id=ARK_ASA_APP_ID,
                 validate=bool(self.cfg.validate_on_update),
-                lock_root=Path(shared or r"C:\ProgramData\ARK-Ascended-Server-Manager"),
+                lock_root=self.app_base,
                 retries=2,
             )
 
@@ -3141,7 +4711,7 @@ class ServerManagerApp:
             raise RuntimeError("Admin/RCON password is empty. Set 'Admin Password (RCON/Admin)' before starting.")
 
         self._stage_required_configs_for_start()
-        apply_staging_to_server(self.app_base, server_dir, self.logger)
+        apply_staging_to_server(self.app_base, self.active_server_id, server_dir, self.logger)
 
         # RCON FIX: capture runtime values for this running instance
         self._capture_runtime_rcon(self.cfg)
@@ -3162,14 +4732,17 @@ class ServerManagerApp:
                 universal_newlines=True,
                 creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
+            pid = self._server_proc.pid
 
         threading.Thread(target=self._server_log_reader, daemon=True).start()
+        if pid is not None:
+            self._discord_start_notifications(pid)
         self._ui(self._refresh_buttons)
 
     def backup_now(self) -> None:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
             backup_server(self.cfg, self.app_base, self.logger)
 
         self._run_task("Backup", job)
@@ -3180,7 +4753,7 @@ class ServerManagerApp:
     def _sync_auto_update_scheduler(self) -> None:
         try:
             self.cfg = self._collect_vars_to_cfg()
-            self.store.save(self.cfg)
+            self._save_active_server_config(self.cfg)
         except Exception:
             return
 
@@ -3217,12 +4790,12 @@ class ServerManagerApp:
     # ---------------------------------------------------------------------
     def _ini_load_target(self, target: str) -> None:
         self.cfg = self._collect_vars_to_cfg()
-        self.store.save(self.cfg)
+        self._save_active_server_config(self.cfg)
 
         server_dir = Path(self.cfg.server_dir)
-        ensure_dir(self.app_base / BASELINE_DIR_NAME / server_key_from_dir(server_dir))
+        ensure_dir(server_root(self.app_base, self.active_server_id) / BASELINE_DIR_NAME)
 
-        paths = ini_stage_paths(self.app_base, server_dir, target)
+        paths = ini_stage_paths(self.app_base, self.active_server_id, server_dir, target)
         ensure_ini_staging_synced(paths, server_running=self._is_server_running(), logger=self.logger)
 
         self._ini_loaded_target = target
@@ -3499,15 +5072,12 @@ class ServerManagerApp:
 
 def launch_gui() -> None:
     set_windows_appusermodel_id(APP_USERMODEL_ID)
+    configure_dpi_awareness()
 
     root = tk.Tk()
-
-    try:
-        style = ttk.Style()
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-    except Exception:
-        pass
+    apply_tk_scaling(root)
+    configure_modern_theme(root)
+    apply_initial_window_geometry(root, 1220, 780)
 
     apply_window_icon(root)
 
@@ -3525,10 +5095,28 @@ def launch_gui() -> None:
         except Exception:
             pass
 
-    _ = ServerManagerApp(root)
+    try:
+        app_base = resolve_storage_root()
+        ensure_dir(app_base)
+    except PermissionError as e:
+        if os.name == "nt" and not is_admin():
+            try:
+                if messagebox.askyesno(
+                    "Shared storage requires admin",
+                    f"{e}\n\nRelaunch with admin rights to initialize shared storage?",
+                ):
+                    if relaunch_as_admin():
+                        root.destroy()
+                        return
+            except Exception:
+                pass
+        messagebox.showerror("Storage unavailable", str(e))
+        root.destroy()
+        return
+
+    _ = ServerManagerApp(root, app_base)
     root.mainloop()
 
 
 if __name__ == "__main__":
-    import sys  # keep here to not pollute top imports with pyinstaller internals
     launch_gui()
