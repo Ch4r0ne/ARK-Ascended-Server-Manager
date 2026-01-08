@@ -189,16 +189,6 @@ The manager may download or use:
 
 ---
 
-## App Pictures
-
-### Discord Integration
-![Server Tab](Preview/ASA_Server_Manager_Preview_4.png)
-
-### Advanced Start Arguments
-![Server Tab](Preview/ASA_Server_Manager_Preview_3.png)
-
----
-
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)](https://www.star-history.com/#Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)
