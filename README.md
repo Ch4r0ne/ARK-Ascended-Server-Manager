@@ -48,6 +48,8 @@ Built for **safe operations**, **reliable RCON**, and a clean **staging-based co
 - On **Start**: staged configs are applied into the server directory
 - On **Stop (Safe)**: baseline is restored into the server directory (staged edits remain for next start)
 
+![Server Tab](Preview/ASA_Server_Manager_Preview_5.png)
+
 ### Advanced Start Arguments (Grouped)
 - Cluster configuration
 - Dino modes (mutual exclusive)
@@ -187,7 +189,18 @@ The manager may download or use:
 
 ---
 
+## App Pictures
+
+### Discord Integration
+![Server Tab](Preview/ASA_Server_Manager_Preview_4.png)
+
+### Advanced Start Arguments
+![Server Tab](Preview/ASA_Server_Manager_Preview_3.png)
+
+---
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)](https://www.star-history.com/#Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)
+
 
