@@ -1,6 +1,7 @@
 # ARK: Survival Ascended Dedicated Server Manager (Windows)
 from __future__ import annotations
 
+import base64
 import contextlib
 import ctypes
 import copy
@@ -21,10 +22,12 @@ import tempfile
 import threading
 import time
 import zipfile
+from ctypes import wintypes
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.error import HTTPError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import tkinter as tk
@@ -766,6 +769,58 @@ def download_file(url: str, dest: Path, logger: logging.Logger, timeout: int = D
     logger.info(f"Saved: {dest}")
 
 # =============================================================================
+# DPAPI (Discord secrets)
+# =============================================================================
+
+class DATA_BLOB(ctypes.Structure):
+    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+
+def _blob_from_bytes(data: bytes) -> DATA_BLOB:
+    buf = (ctypes.c_byte * len(data)).from_buffer_copy(data)
+    return DATA_BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_byte)))
+
+
+def dpapi_encrypt(plain: str) -> str:
+    if os.name != "nt":
+        raise RuntimeError("DPAPI is only available on Windows.")
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+
+    data_in = _blob_from_bytes(plain.encode("utf-8"))
+    data_out = DATA_BLOB()
+    flags = 0x4  # CRYPTPROTECT_LOCAL_MACHINE
+
+    if not crypt32.CryptProtectData(ctypes.byref(data_in), None, None, None, None, flags, ctypes.byref(data_out)):
+        raise RuntimeError("DPAPI encrypt failed.")
+
+    try:
+        out = ctypes.string_at(data_out.pbData, data_out.cbData)
+        return base64.b64encode(out).decode("ascii")
+    finally:
+        kernel32.LocalFree(data_out.pbData)
+
+
+def dpapi_decrypt(enc_b64: str) -> str:
+    if os.name != "nt":
+        raise RuntimeError("DPAPI is only available on Windows.")
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+
+    raw = base64.b64decode(enc_b64.encode("ascii"))
+    data_in = _blob_from_bytes(raw)
+    data_out = DATA_BLOB()
+
+    if not crypt32.CryptUnprotectData(ctypes.byref(data_in), None, None, None, None, 0, ctypes.byref(data_out)):
+        raise RuntimeError("DPAPI decrypt failed.")
+
+    try:
+        out = ctypes.string_at(data_out.pbData, data_out.cbData)
+        return out.decode("utf-8", errors="replace")
+    finally:
+        kernel32.LocalFree(data_out.pbData)
+
+# =============================================================================
 # CONFIG
 # =============================================================================
 
@@ -786,7 +841,7 @@ class GlobalConfig:
 
 @dataclass
 class AppConfig:
-    schema_version: int = 9
+    schema_version: int = 10
     server_dir: str = DEFAULT_SERVER_DIR
 
     map_name: str = DEFAULT_MAP
@@ -863,12 +918,14 @@ class AppConfig:
 
     discord_enable: bool = False
     discord_webhook_url: str = ""
+    discord_webhook_url_enc: str = ""
     discord_poll_interval_sec: int = 300
     discord_notify_start: bool = True
     discord_notify_stop: bool = True
     discord_notify_join: bool = True
     discord_notify_leave: bool = False
     discord_notify_crash: bool = True
+    discord_include_player_id: bool = False
     discord_mention_mode: str = "name"
     discord_mention_map_json: str = ""
 
@@ -945,6 +1002,14 @@ class ServerConfigStore:
 
         cfg.install_optional_certificates = True
 
+        enc_webhook = (cfg.discord_webhook_url_enc or "").strip()
+        if enc_webhook:
+            try:
+                cfg.discord_webhook_url = dpapi_decrypt(enc_webhook)
+            except Exception:
+                cfg.discord_webhook_url = ""
+                warnings.append("Discord webhook could not be decrypted. Please re-enter the URL.")
+
         if not isinstance(cfg.rcon_saved_commands, list):
             cfg.rcon_saved_commands = ["SaveWorld", "DoExit", "ListPlayers", "DestroyWildDinos"]
 
@@ -964,6 +1029,15 @@ class ServerConfigStore:
         with exclusive_file_lock(self.lock_path):
             ensure_dir(self.path.parent)
             base = asdict(cfg)
+            webhook_raw = (cfg.discord_webhook_url or "").strip()
+            if webhook_raw:
+                try:
+                    base["discord_webhook_url_enc"] = dpapi_encrypt(webhook_raw)
+                except Exception as exc:
+                    raise RuntimeError(f"Failed to encrypt Discord webhook URL: {exc}") from exc
+            else:
+                base["discord_webhook_url_enc"] = ""
+            base["discord_webhook_url"] = ""
             for k, v in self._extra.items():
                 if k not in base:
                     base[k] = v
@@ -1906,9 +1980,40 @@ def utc_now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def validate_discord_webhook_url(url: str) -> None:
+    cleaned = (url or "").strip()
+    if not cleaned:
+        raise ValueError("Discord webhook URL is empty.")
+
+    parsed = urlparse(cleaned)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("Discord webhook must use https://")
+
+    host = (parsed.hostname or "").lower()
+    allowed_hosts = {"discord.com", "ptb.discord.com", "canary.discord.com", "discordapp.com"}
+    if host not in allowed_hosts:
+        raise ValueError("Webhook host must be a Discord domain.")
+
+    path = parsed.path or ""
+    if not re.match(r"^/api/webhooks/\d+/.+", path):
+        raise ValueError("Webhook path must look like /api/webhooks/<id>/<token>.")
+
+
+def redact_webhook(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or "discord.com"
+        match = re.match(r"^/api/webhooks/(\d+)/", parsed.path or "")
+        webhook_id = match.group(1) if match else "unknown"
+        return f"https://{host}/api/webhooks/{webhook_id}/[REDACTED]"
+    except Exception:
+        return "[REDACTED]"
+
+
 class DiscordWebhookClient:
     def __init__(self, webhook_url: str, logger: logging.Logger, timeout: float = 8.0):
         self.webhook_url = webhook_url.strip()
+        validate_discord_webhook_url(self.webhook_url)
         self.logger = logger
         self.timeout = timeout
 
@@ -1917,12 +2022,19 @@ class DiscordWebhookClient:
             self.logger.info("[Discord] Webhook URL missing; send skipped.")
             return
 
+        ctx = ssl.create_default_context()
+        try:
+            import certifi  # type: ignore
+            ctx.load_verify_locations(cafile=certifi.where())
+        except Exception:
+            pass
+
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json", "User-Agent": "ARK-ASA-Manager/1.0"}
 
         def send_once() -> int:
             req = Request(self.webhook_url, data=data, headers=headers, method="POST")
-            with urlopen(req, timeout=self.timeout) as resp:
+            with urlopen(req, timeout=self.timeout, context=ctx) as resp:
                 return int(getattr(resp, "status", resp.getcode()))
 
         try:
@@ -1945,11 +2057,16 @@ class DiscordWebhookClient:
                     if status not in (200, 204):
                         self.logger.info(f"[Discord] Webhook returned status {status} after retry.")
                 except Exception as retry_err:
-                    self.logger.info(f"[Discord] Webhook retry failed: {retry_err}")
+                    self.logger.info(
+                        f"[Discord] Webhook retry failed ({redact_webhook(self.webhook_url)}): "
+                        f"{type(retry_err).__name__}"
+                    )
             else:
-                self.logger.info(f"[Discord] Webhook error: {e}")
+                self.logger.info(f"[Discord] Webhook error ({redact_webhook(self.webhook_url)}): HTTP {e.code}")
         except Exception as e:
-            self.logger.info(f"[Discord] Webhook error: {e}")
+            self.logger.info(
+                f"[Discord] Webhook error ({redact_webhook(self.webhook_url)}): {type(e).__name__}"
+            )
 
 
 class PlayerListProvider:
@@ -2047,9 +2164,15 @@ class DiscordNotificationCoordinator:
     def update_config(self, cfg: AppConfig) -> None:
         self._cfg = cfg
         if cfg.discord_enable and cfg.discord_webhook_url.strip():
-            self._webhook = DiscordWebhookClient(cfg.discord_webhook_url, self.logger, timeout=8.0)
+            try:
+                self._webhook = DiscordWebhookClient(cfg.discord_webhook_url, self.logger, timeout=8.0)
+            except ValueError as exc:
+                self._webhook = None
+                self.logger.info(f"[Discord] Webhook URL invalid: {exc}")
         else:
             self._webhook = None
+        if not (cfg.discord_notify_join or cfg.discord_notify_leave):
+            self.stop_polling()
 
     @property
     def state_dir(self) -> Path:
@@ -2081,7 +2204,15 @@ class DiscordNotificationCoordinator:
 
     def start_polling(self, cfg: AppConfig) -> None:
         self.update_config(cfg)
+        if not cfg.discord_enable:
+            return
+        if not (cfg.discord_notify_join or cfg.discord_notify_leave):
+            return
         if self._poll_thread and self._poll_thread.is_alive():
+            return
+        if not cfg.enable_rcon:
+            return
+        if not self._webhook:
             return
         self._stop_event.clear()
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
@@ -2208,9 +2339,9 @@ class DiscordNotificationCoordinator:
         return [
             {"name": "Server", "value": cfg.server_name or "default", "inline": True},
             {"name": "Map", "value": cfg.map_name or DEFAULT_MAP, "inline": True},
-            {"name": "IP/Port", "value": f"{cfg.rcon_host}:{cfg.port}", "inline": True},
-            {"name": "Query Port", "value": str(cfg.query_port), "inline": True},
-            {"name": "Max Players", "value": str(cfg.max_players), "inline": True},
+            {"name": "Game Port", "value": str(int(cfg.port)), "inline": True},
+            {"name": "Query Port", "value": str(int(cfg.query_port)), "inline": True},
+            {"name": "Max Players", "value": str(int(cfg.max_players)), "inline": True},
             {"name": "Mods", "value": ", ".join(mods_display) if mods_display else "None", "inline": False},
         ]
 
@@ -2340,7 +2471,7 @@ class DiscordNotificationCoordinator:
             player = player_data[player_id]
             mention = self._format_player_mention(cfg, player, mapping)
             fields = [{"name": "Online now", "value": str(online_now), "inline": True}]
-            if player.get("id"):
+            if cfg.discord_include_player_id and player.get("id"):
                 fields.append({"name": "Player ID", "value": player["id"], "inline": True})
             embed = {
                 "title": title,
@@ -3063,7 +3194,9 @@ class ServerManagerApp:
             raise RuntimeError("Active server profile is missing.")
 
         if self._server_dir_in_use(cfg.server_dir, exclude_id=self.active_server_id):
-            raise ValueError("Server directory is already registered in another profile.")
+            # Shared install directory across profiles is allowed.
+            # Ensure ports are unique per profile.
+            pass
 
         self.server_store.save(cfg)
         if ref and ref.server_dir != cfg.server_dir:
@@ -3154,12 +3287,15 @@ class ServerManagerApp:
         new_dir = str(Path(new_dir).resolve())
 
         if self._server_dir_in_use(new_dir):
-            messagebox.showerror(
+            ok = messagebox.askyesno(
                 "New Server Profile",
-                "This server install directory is already registered in another profile.\n"
-                "Choose a different folder for each server.",
+                "This server install directory is already used by another profile.\n"
+                "Use the same install directory anyway (shared install)?\n\n"
+                "Note: Make sure each profile uses unique ports.",
             )
-            return
+            if not ok:
+                return
+
 
         try:
             cfg = self._collect_vars_to_cfg()
@@ -3383,6 +3519,7 @@ class ServerManagerApp:
         self.var_discord_notify_join = tk.BooleanVar(master=m)
         self.var_discord_notify_leave = tk.BooleanVar(master=m)
         self.var_discord_notify_crash = tk.BooleanVar(master=m)
+        self.var_discord_include_player_id = tk.BooleanVar(master=m)
         self.var_discord_mention_mode = tk.StringVar(master=m)
         self.var_discord_mention_map_json = tk.StringVar(master=m)
 
@@ -3772,6 +3909,11 @@ class ServerManagerApp:
 
         ttk.Checkbutton(notify_frame, text="Player join", variable=self.var_discord_notify_join).grid(row=1, column=0, sticky="w", padx=(0, 14))
         ttk.Checkbutton(notify_frame, text="Player leave", variable=self.var_discord_notify_leave).grid(row=1, column=1, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(
+            notify_frame,
+            text="Include player IDs (advanced)",
+            variable=self.var_discord_include_player_id,
+        ).grid(row=2, column=0, sticky="w", padx=(0, 14), pady=(6, 0))
 
         mention_frame = ttk.LabelFrame(self.tab_discord, text="Mentions", padding=10)
         mention_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
@@ -4022,6 +4164,7 @@ class ServerManagerApp:
         self.var_discord_notify_join.set(cfg.discord_notify_join)
         self.var_discord_notify_leave.set(cfg.discord_notify_leave)
         self.var_discord_notify_crash.set(cfg.discord_notify_crash)
+        self.var_discord_include_player_id.set(cfg.discord_include_player_id)
         self.var_discord_mention_mode.set(cfg.discord_mention_mode or "name")
         self.var_discord_mention_map_json.set(cfg.discord_mention_map_json)
 
@@ -4103,6 +4246,7 @@ class ServerManagerApp:
         cfg.discord_notify_join = bool(self.var_discord_notify_join.get())
         cfg.discord_notify_leave = bool(self.var_discord_notify_leave.get())
         cfg.discord_notify_crash = bool(self.var_discord_notify_crash.get())
+        cfg.discord_include_player_id = bool(self.var_discord_include_player_id.get())
         cfg.discord_mention_mode = (self.var_discord_mention_mode.get() or "name").strip().lower()
         cfg.discord_mention_map_json = self.var_discord_mention_map_json.get().strip()
         if cfg.discord_mention_mode not in ("name", "mapping", "none"):
@@ -4197,8 +4341,8 @@ class ServerManagerApp:
             self.var_enable_rcon, self.var_rcon_host, self.var_rcon_port,
             self.var_discord_enable, self.var_discord_webhook_url, self.var_discord_poll_interval_min,
             self.var_discord_notify_start, self.var_discord_notify_stop, self.var_discord_notify_join,
-            self.var_discord_notify_leave, self.var_discord_notify_crash, self.var_discord_mention_mode,
-            self.var_discord_mention_map_json,
+            self.var_discord_notify_leave, self.var_discord_notify_crash, self.var_discord_include_player_id,
+            self.var_discord_mention_mode, self.var_discord_mention_map_json,
             self.var_backup_on_stop, self.var_backup_dir, self.var_backup_retention, self.var_backup_include_configs,
             self.var_auto_update_restart, self.var_auto_update_interval_min,
             self.var_hide_gameanalytics_console_logs,
