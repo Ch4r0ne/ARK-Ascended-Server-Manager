@@ -7,6 +7,7 @@
 ![Stars](https://img.shields.io/github/stars/Ch4r0ne/ARK-Ascended-Server-Manager?style=flat)
 ![Issues](https://img.shields.io/github/issues/Ch4r0ne/ARK-Ascended-Server-Manager)
 ![Last Commit](https://img.shields.io/github/last-commit/Ch4r0ne/ARK-Ascended-Server-Manager)
+[![Downloads](https://img.shields.io/github/downloads/Ch4r0ne/ARK-Ascended-Server-Manager/total)](https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases)
 
 **GUI manager** for **ARK: Survival Ascended Dedicated Servers** on **Windows**.  
 Built for **safe operations**, **reliable RCON**, and a clean **staging-based configuration workflow**.
