@@ -2486,6 +2486,54 @@ class DiscordNotificationCoordinator:
     def _maybe_notify_error(self, cfg: AppConfig, error: Exception) -> None:
         if not self._webhook:
             return
+
+        # --- PATCH: RCON Discord notify
+        STAGE_INTERVAL_SEC = 300
+        REQUIRED_STAGES = 3
+        STALE_RESET_SEC = 900
+        POST_NOTIFY_THROTTLE_SEC = 1800
+
+        now = time.time()
+        with self._state_lock:
+            state = self.state_store.load()
+
+            last_notify = state.get("rcon_last_notify_ts", 0)
+            if isinstance(last_notify, (int, float)) and now - float(last_notify) < POST_NOTIFY_THROTTLE_SEC:
+                return
+
+            last_seen = state.get("rcon_last_seen_ts", 0)
+            if isinstance(last_seen, (int, float)) and now - float(last_seen) > STALE_RESET_SEC:
+                state.pop("rcon_stage_count", None)
+                state.pop("rcon_stage_last_ts", None)
+
+            state["rcon_last_seen_ts"] = now
+
+            stage_count = int(state.get("rcon_stage_count", 0) or 0)
+            stage_last_ts = float(state.get("rcon_stage_last_ts", 0) or 0)
+
+            if stage_count == 0:
+                state["rcon_stage_count"] = 1
+                state["rcon_stage_last_ts"] = now
+                self.state_store.save(state)
+                return
+
+            if now - stage_last_ts < STAGE_INTERVAL_SEC:
+                self.state_store.save(state)
+                return
+
+            stage_count += 1
+            state["rcon_stage_count"] = stage_count
+            state["rcon_stage_last_ts"] = now
+
+            if stage_count < REQUIRED_STAGES:
+                self.state_store.save(state)
+                return
+
+            state["rcon_last_notify_ts"] = now
+            state.pop("rcon_stage_count", None)
+            state.pop("rcon_stage_last_ts", None)
+            self.state_store.save(state)
+
         err_hash = hashlib.sha1(str(error).encode("utf-8", errors="ignore")).hexdigest()
         now = time.time()
         with self._state_lock:
@@ -2553,9 +2601,6 @@ def build_server_command(cfg: AppConfig) -> List[str]:
         f"QueryPort={int(cfg.query_port)}",
     ]
 
-    # MaxPlayers is enforced via INI (enterprise reliable), but keep URL arg for compatibility.
-    url_args.append(f"MaxPlayers={int(cfg.max_players)}")
-
     if cfg.server_platform.strip():
         url_args.append(f"ServerPlatform={cfg.server_platform.strip()}")
 
@@ -2573,6 +2618,8 @@ def build_server_command(cfg: AppConfig) -> List[str]:
     mods = cfg.normalized_mods()
     if mods:
         flags.append(f"-mods={mods}")
+        
+    flags.append(f"-WinLiveMaxPlayers={int(cfg.max_players)}")
 
     if cfg.cluster_enable:
         cid = cfg.cluster_id.strip()
