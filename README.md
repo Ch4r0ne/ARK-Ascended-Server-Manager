@@ -16,7 +16,7 @@ Built for **safe operations**, **reliable RCON**, and a clean **staging-based co
 
 ## Preview
 
-![Server Tab](Preview/ASA_Server_Manager_Preview_2.png)
+![Server Tab](docs/img/ASA_Server_Manager_Preview_2.png)
 
 ---
 
@@ -49,7 +49,7 @@ Built for **safe operations**, **reliable RCON**, and a clean **staging-based co
 - On **Start**: staged configs are applied into the server directory
 - On **Stop (Safe)**: baseline is restored into the server directory (staged edits remain for next start)
 
-![Server Tab](Preview/ASA_Server_Manager_Preview_5.png)
+![Server Tab](docs/img/ASA_Server_Manager_Preview_5.png)
 
 ### Advanced Start Arguments (Grouped)
 - Cluster configuration
