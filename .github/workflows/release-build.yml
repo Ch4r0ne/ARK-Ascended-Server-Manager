@@ -1,0 +1,113 @@
+name: Build Windows EXE (PyInstaller)
+
+on:
+  release:
+    types: [published, prereleased]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to upload to (e.g. v2.3.1-rc1). Leave empty for build-only."
+        required: false
+        default: ""
+      upload_to_release:
+        description: "Upload the .exe to the release matching the tag (supports drafts)."
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install runtime dependencies + build tool
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (!(Test-Path "requirements.txt")) {
+            throw "requirements.txt not found in repository root."
+          }
+
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+          # Build tool (kept out of requirements.txt on purpose)
+          pip install pyinstaller
+
+      - name: Build (PyInstaller)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (!(Test-Path ".\assets\app.ico")) {
+            throw "Missing icon: assets\app.ico"
+          }
+          if (!(Test-Path ".\ARK-Ascended-Server-Manager.py")) {
+            throw "Missing entry script: ARK-Ascended-Server-Manager.py"
+          }
+
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "ARK-ASA-Manager" `
+            --icon ".\assets\app.ico" `
+            --add-data ".\assets;assets" `
+            --collect-all rcon `
+            ".\ARK-Ascended-Server-Manager.py"
+
+          if (!(Test-Path "dist\ARK-ASA-Manager.exe")) {
+            throw "Build failed: dist\ARK-ASA-Manager.exe not found."
+          }
+
+      - name: Create checksum (sha256)
+        id: meta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $exe = "dist\ARK-ASA-Manager.exe"
+          $sha = "dist\ARK-ASA-Manager.exe.sha256"
+
+          $hash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  ARK-ASA-Manager.exe" | Out-File -FilePath $sha -Encoding ascii -Force
+
+          "exe_path=$exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha_path=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload artifact (workflow)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARK-ASA-Manager-windows
+          path: |
+            ${{ steps.meta.outputs.exe_path }}
+            ${{ steps.meta.outputs.sha_path }}
+          if-no-files-found: error
+
+      - name: Upload to GitHub Release (on publish/prerelease)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.meta.outputs.exe_path }}
+            ${{ steps.meta.outputs.sha_path }}
+
+      - name: Upload to existing Release (manual, supports drafts)
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_to_release == 'true' && inputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release upload "${{ inputs.tag }}" "${{ steps.meta.outputs.exe_path }}" --clobber
+          gh release upload "${{ inputs.tag }}" "${{ steps.meta.outputs.sha_path }}" --clobber
