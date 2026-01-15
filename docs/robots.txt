@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ch4r0ne.github.io/ARK-Ascended-Server-Manager/sitemap.xml
