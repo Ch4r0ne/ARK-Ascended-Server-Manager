@@ -1,24 +1,45 @@
 name: Link check
 
 on:
+  # Runs for every PR so broken links get caught before merging.
   pull_request:
+
+  # Runs weekly to catch link rot (vendor URLs change over time).
   schedule:
-    - cron: "0 6 * * 5"   # Fridays
+    - cron: "0 6 * * 5" # Fridays 06:00 UTC
+
+  # Manual trigger for quick verification after big doc changes.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   lychee:
+    name: Validate external links (README + docs)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
-      - uses: actions/checkout@v4
+      # 1) Fetch repository contents so Lychee can scan files.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2) Scan links inside README + GitHub Pages files under /docs.
+      #    - Accept common non-fatal statuses:
+      #      200 = OK
+      #      206 = Partial Content (some CDNs respond like this)
+      #      301/302/303/307/308 = Redirects (normal for vendor links)
+      #      429 = Rate limited (avoid false negatives)
+      #    - Exclude mailto: links (Lychee v0.21 uses --exclude patterns, not --exclude-mail)
+      #    - Keep timeouts short and concurrency moderate to avoid flaky failures.
       - name: Check links (README + docs)
         uses: lycheeverse/lychee-action@v2
         with:
           args: >
-            --accept 200,206,429
-            --exclude-mail
+            --verbose
+            --accept 200,206,301,302,303,307,308,429
+            --exclude "mailto:*"
             --timeout 20
             --max-concurrency 8
             README.md docs/**/*.html docs/**/*.xml
