@@ -1,1 +1,3 @@
-legacy/** linguist-vendored
+# Exclude these legacy scripts from GitHub Linguist language stats
+legacy/powershell/ARK-Ascended-Server-Manager.ps1 linguist-vendored
+legacy/powershell/AutoUpdateJob.ps1 linguist-vendored
