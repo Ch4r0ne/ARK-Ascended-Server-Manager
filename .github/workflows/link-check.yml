@@ -1,0 +1,24 @@
+name: Link check
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 5"   # Fridays
+
+permissions:
+  contents: read
+
+jobs:
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check links (README + docs)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >
+            --accept 200,206,429
+            --exclude-mail
+            --timeout 20
+            --max-concurrency 8
+            README.md docs/**/*.html docs/**/*.xml
