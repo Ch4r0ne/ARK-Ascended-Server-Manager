@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to upload to (e.g. v2.3.1-rc1). Leave empty for build-only."
+        description: "Release tag to upload to (e.g. 2.3.3 or v2.3.3). Leave empty for build-only."
         required: false
         default: ""
       upload_to_release:
@@ -25,6 +25,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: (Manual) Checkout requested tag (sanitized)
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tag = "${{ inputs.tag }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Input 'tag' is empty/whitespace after trimming."
+          }
+
+          git fetch --tags --force
+          git checkout "$tag"
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -76,14 +92,16 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $exe = "dist\ARK-ASA-Manager.exe"
-          $sha = "dist\ARK-ASA-Manager.exe.sha256"
+          # Use Windows paths for filesystem ops...
+          $exe_fs = "dist\ARK-ASA-Manager.exe"
+          $sha_fs = "dist\ARK-ASA-Manager.exe.sha256"
 
-          $hash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  ARK-ASA-Manager.exe" | Out-File -FilePath $sha -Encoding ascii -Force
+          $hash = (Get-FileHash -Path $exe_fs -Algorithm SHA256).Hash.ToLower()
+          "$hash  ARK-ASA-Manager.exe" | Out-File -FilePath $sha_fs -Encoding ascii -Force
 
-          "exe_path=$exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "sha_path=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # ...but output POSIX paths for action-gh-release glob matching.
+          "exe_path=dist/ARK-ASA-Manager.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha_path=dist/ARK-ASA-Manager.exe.sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload artifact (workflow)
         uses: actions/upload-artifact@v6
@@ -94,20 +112,52 @@ jobs:
             ${{ steps.meta.outputs.sha_path }}
           if-no-files-found: error
 
+      - name: Debug dist output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem -Force -Recurse dist | Format-Table FullName, Length
+
       - name: Upload to GitHub Release (on publish/prerelease)
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.release.tag_name }}
           files: |
             ${{ steps.meta.outputs.exe_path }}
             ${{ steps.meta.outputs.sha_path }}
+          fail_on_unmatched_files: true
 
-      - name: Upload to existing Release (manual, supports drafts)
+      - name: Upload to existing Release (manual, supports drafts, auto-create)
         if: github.event_name == 'workflow_dispatch' && inputs.upload_to_release == 'true' && inputs.tag != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
-          gh release upload "${{ inputs.tag }}" "${{ steps.meta.outputs.exe_path }}" --clobber
-          gh release upload "${{ inputs.tag }}" "${{ steps.meta.outputs.sha_path }}" --clobber
+
+          $tag = "${{ inputs.tag }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Input 'tag' is empty/whitespace after trimming."
+          }
+
+          $exe = "${{ steps.meta.outputs.exe_path }}"
+          $sha = "${{ steps.meta.outputs.sha_path }}"
+
+          # Ensure release exists (create draft if missing)
+          $exists = $true
+          try {
+            gh release view "$tag" | Out-Null
+          } catch {
+            $exists = $false
+          }
+
+          if (-not $exists) {
+            Write-Host "Release for tag '$tag' not found. Creating a draft release..."
+            gh release create "$tag" --draft --title "$tag" --notes "Automated build upload."
+          } else {
+            Write-Host "Release for tag '$tag' found."
+          }
+
+          gh release upload "$tag" "$exe" --clobber
+          gh release upload "$tag" "$sha" --clobber
