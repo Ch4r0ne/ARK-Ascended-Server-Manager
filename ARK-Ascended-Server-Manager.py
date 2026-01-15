@@ -3449,8 +3449,6 @@ class ServerManagerApp:
         # Hide GameAnalytics spam (all severities)
         if "GameAnalytics" in s:
             return True
-        if "api.gameanalytics.com" in s:
-            return True
 
         return False
 
