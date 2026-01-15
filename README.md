@@ -15,7 +15,7 @@
 
 ## Quickstart (recommended)
 
-1. Download the latest EXE from **Releases**: https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases/latest
+1. Download the latest EXE: [Releases (latest)](https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases/latest)
 2. Start `ARK-ASA-Manager.exe`
 3. Run **First Install** once (**Administrator recommended**)
 4. Configure **Paths**, **Server Settings**, **Operations**
