@@ -1,0 +1,58 @@
+name: Certificate expiry check
+
+on:
+  schedule:
+    - cron: "15 6 * * 1" # Mondays 06:15 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check expiry dates (downloaded CA files)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Add CA URLs you care about
+          URLS=(
+            "https://www.amazontrust.com/repository/AmazonRootCA1.cer"
+            "https://crt.r2m02.amazontrust.com/r2m02.cer"
+          )
+
+          THRESHOLD_DAYS=90
+          NOW_EPOCH=$(date -u +%s)
+          THRESHOLD_EPOCH=$(( NOW_EPOCH + THRESHOLD_DAYS*24*60*60 ))
+
+          echo "Checking certificate expiry (threshold: ${THRESHOLD_DAYS} days)..."
+          FAILED=0
+
+          for url in "${URLS[@]}"; do
+            echo "----"
+            echo "URL: $url"
+            tmp="$(mktemp)"
+            curl -fsSL "$url" -o "$tmp"
+
+            # Convert DER .cer to PEM and read notAfter
+            enddate=$(openssl x509 -inform DER -in "$tmp" -noout -enddate | cut -d= -f2)
+            end_epoch=$(date -u -d "$enddate" +%s)
+
+            echo "Expires: $enddate"
+
+            if [ "$end_epoch" -lt "$THRESHOLD_EPOCH" ]; then
+              echo "❌ EXPIRING SOON (within $THRESHOLD_DAYS days): $url"
+              FAILED=1
+            else
+              echo "✅ OK"
+            fi
+
+            rm -f "$tmp"
+          done
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "One or more certificates are expiring soon."
+            exit 1
+          fi
