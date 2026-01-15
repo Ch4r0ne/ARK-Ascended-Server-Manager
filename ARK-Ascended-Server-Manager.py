@@ -970,7 +970,7 @@ class ServerConfigStore:
             data = json.loads(raw)
             if not isinstance(data, dict):
                 raise ValueError("Config root is not a JSON object")
-        except Exception as e:
+        except Exception:
             try:
                 bad = self.path.with_name(f"config.corrupt.{now_ts()}.json")
                 shutil.copy2(self.path, bad)
@@ -1078,7 +1078,7 @@ class GlobalConfigStore:
             data = json.loads(raw)
             if not isinstance(data, dict):
                 raise ValueError("Global config root is not a JSON object")
-        except Exception as e:
+        except Exception:
             try:
                 bad = self.path.with_name(f"global.corrupt.{now_ts()}.json")
                 shutil.copy2(self.path, bad)
@@ -1557,10 +1557,10 @@ class IniDocument:
         return IniDocument(out)
 
     def is_effectively_empty(self) -> bool:
-        for l in self.lines:
-            if l.kind == "kv":
+        for line in self.lines:
+            if line.kind == "kv":
                 return False
-            if l.kind == "section":
+            if line.kind == "section":
                 continue
         return True
 
@@ -1582,7 +1582,7 @@ class IniDocument:
         section = section.strip()
         if not section:
             return
-        if any(l.kind == "section" and l.section == section for l in self.lines):
+        if any(line.kind == "section" and line.section == section for line in self.lines):
             return
 
         if self.lines and not self.lines[-1].raw.endswith("\n"):
@@ -1598,12 +1598,12 @@ class IniDocument:
             return
         self.ensure_section(section)
 
-        for l in self.lines:
-            if l.kind == "kv" and l.section == section and l.key.lower() == key.lower():
-                nl = "\r\n" if l.raw.endswith("\r\n") else ("\n" if l.raw.endswith("\n") else "\n")
-                l.key = key
-                l.value = value
-                l.raw = f"{key}={value}{nl}"
+        for line in self.lines:
+            if line.kind == "kv" and line.section == section and line.key.lower() == key.lower():
+                nl = "\r\n" if line.raw.endswith("\r\n") else ("\n" if line.raw.endswith("\n") else "\n")
+                line.key = key
+                line.value = value
+                line.raw = f"{key}={value}{nl}"
                 return
 
         self.append_kv(section, key, value)
@@ -1618,8 +1618,8 @@ class IniDocument:
         self.ensure_section(section)
 
         insert_at = None
-        for i, l in enumerate(self.lines):
-            if l.kind == "section" and l.section == section:
+        for i, line in enumerate(self.lines):
+            if line.kind == "section" and line.section == section:
                 insert_at = i + 1
                 for j in range(i + 1, len(self.lines)):
                     if self.lines[j].kind == "section":
@@ -1637,12 +1637,12 @@ class IniDocument:
     def update_value_at(self, line_index: int, value: str) -> None:
         if not (0 <= line_index < len(self.lines)):
             return
-        l = self.lines[line_index]
-        if l.kind != "kv":
+        line = self.lines[line_index]
+        if line.kind != "kv":
             return
-        nl = "\r\n" if l.raw.endswith("\r\n") else ("\n" if l.raw.endswith("\n") else "\n")
-        l.value = str(value)
-        l.raw = f"{l.key}={l.value}{nl}"
+        nl = "\r\n" if line.raw.endswith("\r\n") else ("\n" if line.raw.endswith("\n") else "\n")
+        line.value = str(value)
+        line.raw = f"{line.key}={line.value}{nl}"
 
     def delete_at(self, line_index: int) -> None:
         if not (0 <= line_index < len(self.lines)):
@@ -1652,7 +1652,7 @@ class IniDocument:
         self.lines.pop(line_index)
 
     def to_text(self) -> str:
-        return "".join(l.raw for l in self.lines)
+        return "".join(line.raw for line in self.lines)
 
 
 def read_ini(path: Path) -> IniDocument:
@@ -3518,10 +3518,6 @@ class ServerManagerApp:
         self._run_task("Discord Test", job)
 
     def _discord_open_state_folder(self) -> None:
-        try:
-            cfg = self._collect_vars_to_cfg()
-        except Exception:
-            cfg = self.cfg
         server_id = self.active_server_id
         path = server_discord_state_path(self.app_base, server_id)
         open_in_explorer(path, select_file=True)
@@ -4496,8 +4492,9 @@ class ServerManagerApp:
                 fn()
                 self.logger.info(f"=== {name} completed ===")
             except Exception as e:
-                self.logger.error(f"{name} failed: {e}")
-                self._ui(lambda: messagebox.showerror(name, str(e)))
+                err = str(e)
+                self.logger.error(f"{name} failed: {err}")
+                self._ui(lambda _err=err: messagebox.showerror(name, _err))
             finally:
                 self._set_busy(False)
 
@@ -4617,7 +4614,6 @@ class ServerManagerApp:
             self.cfg = self._collect_vars_to_cfg()
             self._save_active_server_config(self.cfg)
 
-            shared = _programdata_base()
             steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
 
             steamcmd_app_update(
@@ -4874,7 +4870,6 @@ class ServerManagerApp:
                 self._stop_server_impl(inline=True)
                 self._discord_stop_notifications(requested=True)
 
-            shared = _programdata_base()
             steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
 
             steamcmd_app_update(
