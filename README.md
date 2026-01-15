@@ -1,13 +1,11 @@
-# ARK: Survival Ascended Server Manager (Windows)
+# ARK ASA Server Manager (Windows)
 
-[![Wiki](https://img.shields.io/badge/Wiki-Configuration-0078D6?logo=gitbook&logoColor=white)](https://ark.wiki.gg/wiki/Server_configuration)
+[![Wiki](https://img.shields.io/badge/Wiki-Server%20Configuration-0078D6?logo=gitbook&logoColor=white)](https://ark.wiki.gg/wiki/Server_configuration)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/github/license/Ch4r0ne/ARK-Ascended-Server-Manager)
-![Stars](https://img.shields.io/github/stars/Ch4r0ne/ARK-Ascended-Server-Manager?style=flat)
 ![Issues](https://img.shields.io/github/issues/Ch4r0ne/ARK-Ascended-Server-Manager)
-![Last Commit](https://img.shields.io/github/last-commit/Ch4r0ne/ARK-Ascended-Server-Manager)
-[![Downloads](https://img.shields.io/github/downloads/Ch4r0ne/ARK-Ascended-Server-Manager/total)](https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases)
+[![Downloads](https://img.shields.io/github/downloads/Ch4r0ne/ARK-Ascended-Server-Manager/total)](https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases/latest)
 
 **ARK ASA Server Manager for Windows** manage **ARK: Survival Ascended (ASA) dedicated servers** with **safe start/stop**, **reliable RCON**, and a clean **staging-based INI workflow**.
 
@@ -17,7 +15,7 @@
 
 ## Quickstart (recommended)
 
-1. Download the latest EXE from **Releases**: https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases
+1. Download the latest EXE from **Releases**: https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases/latest
 2. Start `ARK-ASA-Manager.exe`
 3. Run **First Install** once (**Administrator recommended**)
 4. Configure **Paths**, **Server Settings**, **Operations**
@@ -62,10 +60,11 @@ This manager separates *edit time* and *runtime*:
 ### Safe operations
 - **Deterministic start-line generation**  
   Map, ports, session, mods, BattleEye, RCON, cluster, and advanced flags are generated consistently.
-- **Safe stop sequence rcon**  
+- **Safe stop sequence**  
   `SaveWorld` → `DoExit`
 
 ### Reliable RCON
+- Uses Python **`rcon` (Source RCON)**
 - Saved commands + fast execution
 - Output written into the shared **Console**
 
@@ -193,8 +192,11 @@ Run the EXE **as Administrator**. Installers and certificate store writes may fa
 | Optional | Python `rcon` | Preferred Source RCON | [PyPI: rcon](https://pypi.org/project/rcon/) |
 
 > **Note:** “First Install” may download these components from official vendor endpoints (listed).
----
 
-## Star History
+<details>
+<summary><b>Star History</b></summary>
+<br>
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)](https://www.star-history.com/#Ch4r0ne/ARK-Ascended-Server-Manager&type=date&legend=bottom-right)
+
+</details>
