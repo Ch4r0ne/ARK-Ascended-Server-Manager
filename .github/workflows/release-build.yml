@@ -86,7 +86,7 @@ jobs:
           "sha_path=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload artifact (workflow)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ARK-ASA-Manager-windows
           path: |
