@@ -1834,7 +1834,7 @@ class RCONProtocolError(RCONError):
     ...
 
 
-class BuiltinRCONClient:
+class RconClient:
     SERVERDATA_RESPONSE_VALUE = 0
     SERVERDATA_EXECCOMMAND = 2
     SERVERDATA_AUTH = 3
@@ -1848,7 +1848,7 @@ class BuiltinRCONClient:
         self._sock: Optional[socket.socket] = None
         self._req_id = 100
 
-    def __enter__(self) -> "BuiltinRCONClient":
+    def __enter__(self) -> "RconClient":
         self.connect()
         self.login()
         return self
@@ -1937,40 +1937,12 @@ class BuiltinRCONClient:
         return "".join(chunks).strip()
 
 
-def get_rcon_client_factory() -> Callable[[str, int, str, float], Any]:
-    try:
-        from rcon.source import Client as SourceClient  # type: ignore
-
-        class _Adapter:
-            def __init__(self, host: str, port: int, password: str, timeout: float):
-                self.host = host
-                self.port = int(port)
-                self.password = password
-                self.timeout = float(timeout)
-                self._c: Optional[SourceClient] = None
-
-            def __enter__(self) -> "_Adapter":
-                self._c = SourceClient(self.host, self.port, passwd=self.password, timeout=self.timeout)
-                self._c.__enter__()
-                return self
-
-            def __exit__(self, exc_type, exc, tb) -> None:
-                try:
-                    if self._c:
-                        self._c.__exit__(exc_type, exc, tb)
-                finally:
-                    self._c = None
-
-            def command(self, cmd: str) -> str:
-                assert self._c is not None
-                parts = shlex.split(cmd)
-                if not parts:
-                    return ""
-                return str(self._c.run(*parts))
-
-        return lambda h, p, pw, t: _Adapter(h, p, pw, t)
-    except Exception:
-        return lambda h, p, pw, t: BuiltinRCONClient(h, p, pw, t)
+def create_rcon_client(host: str, port: int, password: str, timeout: float = 4.0) -> RconClient:
+    """
+    Primary RCON implementation.
+    Built-in (no third-party dependency) to ensure deterministic runtime and packaging.
+    """
+    return RconClient(host, port, password, timeout)
 
 # =============================================================================
 # DISCORD NOTIFICATIONS
@@ -2922,7 +2894,7 @@ class ServerManagerApp:
         self._auto_update_thread: Optional[threading.Thread] = None
         self._auto_update_stop = threading.Event()
 
-        self._rcon_factory = get_rcon_client_factory()
+        self._rcon_factory = create_rcon_client
 
         # -------------------------
         # RCON FIX (runtime snapshot)
@@ -3465,6 +3437,25 @@ class ServerManagerApp:
         self._runtime_rcon_host = None
         self._runtime_rcon_port = None
         self._runtime_rcon_password = None
+
+    def _current_rcon_params(self) -> Tuple[str, int, str]:
+        # If server is running, use the runtime snapshot (prevents mismatch when GUI edits values).
+        if (
+            self._is_server_running()
+            and self._runtime_rcon_host
+            and self._runtime_rcon_port
+            and self._runtime_rcon_password is not None
+        ):
+            return (
+                self._runtime_rcon_host,
+                int(self._runtime_rcon_port),
+                str(self._runtime_rcon_password),
+            )
+
+        host = (self.cfg.rcon_host or DEFAULT_RCON_HOST).strip()
+        port = int(self.cfg.rcon_port)
+        password = str(self.cfg.admin_password or "")
+        return host, port, password
 
     # ---------------------------------------------------------------------
     # Discord helpers
@@ -4710,37 +4701,28 @@ class ServerManagerApp:
 
             self._ui(self._refresh_buttons)
 
-    def _rcon_try(self, cmd: str, timeout: float = 4.0, retry_window_sec: int = 15) -> str:
+    def _rcon_try(self, cmd: str, *, timeout: float = 4.0) -> str:
         if not self.cfg.enable_rcon:
-            raise RuntimeError("RCON disabled in config.")
+            raise RCONError("RCON is disabled in the active profile.")
 
-        # RCON FIX:
-        # If server is running, always use the runtime snapshot captured at Start.
-        # This prevents "Authentication failed" when GUI values changed after start.
-        if self._is_server_running() and self._runtime_rcon_password is not None:
-            host = (self._runtime_rcon_host or DEFAULT_RCON_HOST).strip()
-            port = int(self._runtime_rcon_port or DEFAULT_RCON_PORT)
-            password = self._runtime_rcon_password
-        else:
-            host = (self.cfg.rcon_host or DEFAULT_RCON_HOST).strip()
-            port = int(self.cfg.rcon_port)
-            password = (self.cfg.admin_password or "").strip()
+        host, port, password = self._current_rcon_params()
 
         if not password:
-            raise RuntimeError("Admin password is empty.")
+            raise RCONError("Admin password is empty.")
 
-        start = time.time()
-        last_err: Optional[Exception] = None
-        while time.time() - start < retry_window_sec:
-            try:
-                client = self._rcon_factory(host, port, password, timeout)
-                with client as c:
-                    return str(c.command(cmd))
-            except Exception as e:
-                last_err = e
-                time.sleep(0.5)
-
-        raise RuntimeError(str(last_err) if last_err else "RCON failed")
+        try:
+            with self._rcon_factory(host, port, password, float(timeout)) as rcon:
+                return str(rcon.command(cmd) or "").strip()
+        except RCONAuthError as e:
+            raise RCONAuthError(
+                f"RCON auth failed ({host}:{port}). Check AdminPassword and server RCON settings."
+            ) from e
+        except RCONConnectionError as e:
+            raise RCONConnectionError(
+                f"RCON connection failed ({host}:{port}). Is the server running and port reachable?"
+            ) from e
+        except Exception as e:
+            raise RCONError(f"RCON command failed: {type(e).__name__}: {e}") from e
 
     def send_rcon(self) -> None:
         cmd = self.var_rcon_cmd.get().strip()
@@ -4812,7 +4794,7 @@ class ServerManagerApp:
                 self.logger.info("RCON: DoExit")
                 _ = self._rcon_try("DoExit", timeout=6.0)
             except Exception as e:
-                self.logger.info(f"RCON DoExit failed -> terminate fallback: {e}")
+                self.logger.info(f"RCON DoExit failed -> terminate process: {e}")
 
         t_end = time.time() + 20
         while time.time() < t_end and p.poll() is None:
