@@ -189,7 +189,6 @@ Run the EXE **as Administrator**. Installers and certificate store writes may fa
 | Runtime | DirectX Web Setup | Legacy DirectX components | [dxwebsetup.exe](https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe) |
 | Trust | AmazonRootCA1 | TLS trust chain (hardened hosts / strict chains) | [AmazonRootCA1.cer](https://www.amazontrust.com/repository/AmazonRootCA1.cer) |
 | Trust | Amazon R2M02 | TLS trust chain (hardened hosts / strict chains) | [r2m02.cer](https://crt.r2m02.amazontrust.com/r2m02.cer) |
-| Optional | Python `rcon` | Preferred Source RCON | [PyPI: rcon](https://pypi.org/project/rcon/) |
 
 > **Note:** “First Install” may download these components from official vendor endpoints (listed).
 
