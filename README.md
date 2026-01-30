@@ -6,6 +6,7 @@
 ![License](https://img.shields.io/github/license/Ch4r0ne/ARK-Ascended-Server-Manager)
 ![Issues](https://img.shields.io/github/issues/Ch4r0ne/ARK-Ascended-Server-Manager)
 [![Downloads](https://img.shields.io/github/downloads/Ch4r0ne/ARK-Ascended-Server-Manager/total)](https://github.com/Ch4r0ne/ARK-Ascended-Server-Manager/releases/latest)
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal)](https://www.paypal.com/donate/?business=leinich%40me.com&currency_code=EUR)
 
 **ARK ASA Server Manager for Windows** manage **ARK: Survival Ascended (ASA) dedicated servers** with **safe start/stop**, **reliable RCON**, and a clean **staging-based INI workflow**.
 
@@ -28,7 +29,7 @@
 
 ## Preview
 
-![Server Tab](docs/img/ASA_Server_Manager_Preview_2.png)
+![Server Tab](docs/img/ASA_Server_Manager_Preview_6.png)
 
 ---
 
@@ -87,9 +88,9 @@ This manager separates *edit time* and *runtime*:
 - Optional “include configs” mode
 
 ### Auto update & restart
-- Interval-based update/validate + safe restart
+- Time-based update/validate + safe restart
 - Skips triggers while the app is busy
-
+- Add the 'Auto Start' option to the last profile on startup.
 ---
 
 Option B: Build EXE (PyInstaller)
