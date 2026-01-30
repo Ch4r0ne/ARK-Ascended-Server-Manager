@@ -24,6 +24,7 @@ import time
 import zipfile
 from ctypes import wintypes
 from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime, time as dt_time, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.error import HTTPError
@@ -74,6 +75,7 @@ DEFAULT_RCON_PORT = 27020
 DOWNLOAD_TIMEOUT_SEC = 180
 AUTOSAVE_DEBOUNCE_MS = 700
 INI_APPLY_DEBOUNCE_MS = 500
+DEFAULT_SCHEDULE_TIME = "03:00"
 
 MAP_PRESETS = [
     "TheIsland_WP",
@@ -101,6 +103,9 @@ SERVER_CONFIG_NAME = "server.json"
 DISCORD_STATE_FILE_NAME = "discord_state.json"
 
 LOG_LEVEL = logging.INFO
+
+AUTO_RESTART_EXIT_CODES = {3}
+AUTO_RESTART_DELAY_SEC = 5.0
 
 DIRECTX_LEGACY_DLLS = [
     "d3dx9_43.dll",
@@ -136,6 +141,35 @@ def resource_path(relative: str) -> str:
     if base:
         return str(Path(base) / relative)
     return str(Path(__file__).resolve().parent / relative)
+
+
+def parse_time_hhmm(value: str) -> Optional[dt_time]:
+    if not value:
+        return None
+    clean = value.strip()
+    if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", clean):
+        return None
+    hour_str, minute_str = clean.split(":")
+    return dt_time(hour=int(hour_str), minute=int(minute_str))
+
+
+def normalize_time_hhmm(value: str, fallback: str = DEFAULT_SCHEDULE_TIME) -> str:
+    parsed = parse_time_hhmm(value)
+    if not parsed:
+        return fallback
+    return f"{parsed.hour:02d}:{parsed.minute:02d}"
+
+
+def next_scheduled_datetime(now: datetime, schedule_time: dt_time) -> datetime:
+    candidate = now.replace(
+        hour=schedule_time.hour,
+        minute=schedule_time.minute,
+        second=0,
+        microsecond=0,
+    )
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate
 
 
 def set_windows_appusermodel_id(app_id: str) -> None:
@@ -382,6 +416,74 @@ def _scaled_dimension(root: tk.Tk, size: int) -> int:
     except Exception:
         scaling = 1.0
     return max(1, int(size * scaling))
+
+
+class HoverTooltip:
+    def __init__(self, widget: tk.Widget, text: str, delay_ms: int = 500) -> None:
+        self.widget = widget
+        self.text = text
+        self.delay_ms = delay_ms
+        self._after_id: Optional[str] = None
+        self._tip_window: Optional[tk.Toplevel] = None
+
+        self.widget.bind("<Enter>", self._schedule, add="+")
+        self.widget.bind("<Leave>", self._hide, add="+")
+        self.widget.bind("<ButtonPress>", self._hide, add="+")
+        self.widget.bind("<FocusOut>", self._hide, add="+")
+
+    def _schedule(self, _event: tk.Event) -> None:
+        self._cancel()
+        self._after_id = self.widget.after(self.delay_ms, self._show)
+
+    def _cancel(self) -> None:
+        if self._after_id:
+            try:
+                self.widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _show(self) -> None:
+        if self._tip_window or not self.text:
+            return
+        theme = THEME_COLORS
+        self._tip_window = tk.Toplevel(self.widget)
+        self._tip_window.overrideredirect(True)
+        try:
+            self._tip_window.attributes("-topmost", True)
+        except Exception:
+            pass
+
+        frame = tk.Frame(
+            self._tip_window,
+            background=theme["surface"],
+            borderwidth=1,
+            relief="solid",
+        )
+        label = tk.Label(
+            frame,
+            text=self.text,
+            background=theme["surface"],
+            foreground=theme["text"],
+            padx=8,
+            pady=4,
+        )
+        label.pack()
+        frame.pack()
+
+        self._tip_window.update_idletasks()
+        x = self.widget.winfo_rootx() + 10
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self._tip_window.geometry(f"+{x}+{y}")
+
+    def _hide(self, _event: tk.Event) -> None:
+        self._cancel()
+        if self._tip_window:
+            try:
+                self._tip_window.destroy()
+            except Exception:
+                pass
+            self._tip_window = None
 
 
 def apply_min_window_size(root: tk.Tk, width: int, height: int) -> None:
@@ -836,12 +938,13 @@ class GlobalConfig:
     schema_version: int = 1
     steamcmd_dir: str = DEFAULT_STEAMCMD_DIR
     last_selected_server_id: str = ""
+    start_on_startup: bool = False
     servers: List[ServerRef] = field(default_factory=list)
 
 
 @dataclass
 class AppConfig:
-    schema_version: int = 10
+    schema_version: int = 12
     server_dir: str = DEFAULT_SERVER_DIR
 
     map_name: str = DEFAULT_MAP
@@ -870,10 +973,11 @@ class AppConfig:
     backup_on_stop: bool = True
     backup_dir: str = ""
     backup_retention: int = 20
-    backup_include_configs: bool = False
+    backup_include_configs: bool = True
 
     auto_update_restart: bool = False
-    auto_update_interval_min: int = 360
+    auto_update_time: str = DEFAULT_SCHEDULE_TIME
+    update_on_startup: bool = False
 
     install_optional_certificates: bool = True  # enforced True
 
@@ -982,6 +1086,8 @@ class ServerConfigStore:
 
         known = {f.name: f for f in fields(AppConfig)}
         self._extra = {k: v for k, v in data.items() if k not in known}
+        for deprecated in ("auto_start_schedule", "auto_start_time"):
+            self._extra.pop(deprecated, None)
 
         for name, fdef in known.items():
             if name not in data:
@@ -1088,12 +1194,13 @@ class GlobalConfigStore:
             migrated = True
             return GlobalConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
 
-        known = {"schema_version", "steamcmd_dir", "last_selected_server_id", "servers"}
+        known = {"schema_version", "steamcmd_dir", "last_selected_server_id", "start_on_startup", "servers"}
         self._extra = {k: v for k, v in data.items() if k not in known}
 
         cfg.schema_version = safe_int(data.get("schema_version", cfg.schema_version), cfg.schema_version)
         cfg.steamcmd_dir = str(data.get("steamcmd_dir") or cfg.steamcmd_dir)
         cfg.last_selected_server_id = str(data.get("last_selected_server_id") or "")
+        cfg.start_on_startup = safe_bool(data.get("start_on_startup"), cfg.start_on_startup)
 
         servers_raw = data.get("servers")
         if isinstance(servers_raw, list):
@@ -2765,9 +2872,7 @@ def backup_server(cfg: AppConfig, app_base: Path, logger: logging.Logger) -> Opt
     name = f"ASA_Backup_{now_ts()}.zip"
     out_zip = target_dir / name
 
-    include_paths = [saved]
-    if cfg.backup_include_configs:
-        include_paths.append(server_config_dir(server_dir))
+    include_paths = [saved, server_config_dir(server_dir)]
 
     logger.info(f"Creating backup: {out_zip}")
 
@@ -2887,6 +2992,7 @@ class ServerManagerApp:
         self._server_proc: Optional[subprocess.Popen] = None
         self._server_proc_lock = threading.Lock()
         self._stop_log_reader = threading.Event()
+        self._stop_requested = threading.Event()
 
         self._autosave_after_id: Optional[str] = None
         self._autosave_guard = False
@@ -2959,9 +3065,11 @@ class ServerManagerApp:
         self._autosave_guard = False
 
         self._sync_map_mode()
+        self._sync_backup_label_texts()
         self._hook_autosave()
         self._refresh_buttons()
         self._sync_auto_update_scheduler()
+        self.root.after(800, self._auto_start_on_launch)
 
     # ---------------------------------------------------------------------
     # Profile / config init
@@ -3558,10 +3666,11 @@ class ServerManagerApp:
         self.var_backup_on_stop = tk.BooleanVar(master=m)
         self.var_backup_dir = tk.StringVar(master=m)
         self.var_backup_retention = tk.StringVar(master=m)
-        self.var_backup_include_configs = tk.BooleanVar(master=m)
 
         self.var_auto_update_restart = tk.BooleanVar(master=m)
-        self.var_auto_update_interval_min = tk.StringVar(master=m)
+        self.var_auto_start_on_launch = tk.BooleanVar(master=m)
+        self.var_auto_update_time = tk.StringVar(master=m)
+        self.var_update_on_startup = tk.BooleanVar(master=m)
 
         # Hide GameAnalytics spam (console only)
         self.var_hide_gameanalytics_console_logs = tk.BooleanVar(master=m)
@@ -3631,6 +3740,11 @@ class ServerManagerApp:
 
         self.nb = ttk.Notebook(top)
         self.nb.grid(row=0, column=0, sticky="nsew")
+
+        header = ttk.Frame(top)
+        header.place(in_=self.nb, relx=1.0, x=-8, y=6, anchor="ne")
+        ttk.Label(header, text="Status:", foreground=theme["muted"]).grid(row=0, column=0, sticky="e")
+        ttk.Label(header, textvariable=self.var_status, anchor="e").grid(row=0, column=1, sticky="e", padx=(6, 0))
 
         self.tab_server = ttk.Frame(self.nb, padding=10)
         self.tab_adv = ttk.Frame(self.nb, padding=10)
@@ -3747,72 +3861,106 @@ class ServerManagerApp:
         self.txt_mods.configure(xscrollcommand=xscroll.set)
 
         ttk.Label(lf_server, text="Custom Server Arguments (optional)").grid(row=9, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(lf_server, textvariable=self.var_custom_start_args).grid(row=9, column=1, sticky="ew", padx=6, pady=(8, 0))
-        ttk.Label(lf_server, text="Example: -Parameter1 -Parameter2").grid(row=10, column=1, sticky="w", padx=6, pady=(2, 0))
+        self.ent_custom_start_args = ttk.Entry(lf_server, textvariable=self.var_custom_start_args)
+        self.ent_custom_start_args.grid(row=9, column=1, sticky="ew", padx=6, pady=(8, 0))
+        ttk.Label(lf_server, text="").grid(row=10, column=1, sticky="w", padx=6, pady=(2, 0))
+        self._custom_args_tooltip = HoverTooltip(
+            self.ent_custom_start_args,
+            "Example: -Parameter1 -Parameter2",
+        )
 
-        ttk.Checkbutton(lf_ops, text="Enable BattlEye", variable=self.var_enable_battleye).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(lf_ops, text="Automanaged Mods", variable=self.var_automanaged_mods).grid(row=1, column=0, sticky="w")
-        ttk.Checkbutton(lf_ops, text="Enable RCON", variable=self.var_enable_rcon).grid(row=2, column=0, sticky="w")
+        actions = ttk.Frame(lf_server, padding=(0, 10, 0, 0))
+        actions.grid(row=11, column=0, columnspan=2, sticky="ew")
+        actions.columnconfigure(0, weight=1)
+        actions.columnconfigure(1, weight=1)
+        actions.columnconfigure(2, weight=1)
 
-        ttk.Label(lf_ops, text="RCON Host").grid(row=3, column=0, sticky="w")
-        ttk.Entry(lf_ops, textvariable=self.var_rcon_host).grid(row=3, column=1, sticky="ew", padx=6)
+        self.btn_first_install = ttk.Button(actions, text="First Install", command=self.first_install)
+        self.btn_update_validate = ttk.Button(actions, text="Update / Validate", command=self.update_validate)
+        self.btn_update_restart = ttk.Button(actions, text="Update / Restart (Safe)", command=self.update_and_restart_safe)
+        self.btn_start = ttk.Button(actions, text="Start Server", command=self.start_server)
+        self.btn_stop = ttk.Button(actions, text="Stop Server (Safe)", command=self.stop_server_safe)
+        self.btn_backup_now = ttk.Button(actions, text="Backup Now", command=self.backup_now)
 
-        ttk.Label(lf_ops, text="RCON Port").grid(row=4, column=0, sticky="w")
-        ttk.Entry(lf_ops, textvariable=self.var_rcon_port, validate="key", validatecommand=vcmd).grid(row=4, column=1, sticky="ew", padx=6)
+        self.btn_first_install.grid(row=0, column=0, padx=5, pady=(0, 6), sticky="ew")
+        self.btn_stop.grid(row=0, column=1, padx=5, pady=(0, 6), sticky="ew")
+        self.btn_start.grid(row=0, column=2, padx=5, pady=(0, 6), sticky="ew")
+        self.btn_update_validate.grid(row=1, column=0, padx=5, sticky="ew")
+        self.btn_update_restart.grid(row=1, column=1, padx=5, sticky="ew")
+        self.btn_backup_now.grid(row=1, column=2, padx=5, sticky="ew")
 
-        ttk.Checkbutton(lf_ops, text="Validate on Update", variable=self.var_validate_on_update).grid(row=5, column=0, sticky="w", pady=(8, 0))
+        update_frame = ttk.LabelFrame(lf_ops, text="Update Options", padding=8)
+        update_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        update_frame.columnconfigure(1, weight=1)
 
-        ttk.Separator(lf_ops).grid(row=6, column=0, columnspan=2, sticky="ew", pady=10)
-        ttk.Checkbutton(lf_ops, text="Backup on Stop", variable=self.var_backup_on_stop).grid(row=7, column=0, sticky="w")
-
-        ttk.Label(lf_ops, text="Backup Directory").grid(row=8, column=0, sticky="w")
-        ttk.Entry(lf_ops, textvariable=self.var_backup_dir).grid(row=8, column=1, sticky="ew", padx=6)
-        ttk.Button(lf_ops, text="Browse", command=self._browse_backup_dir).grid(row=8, column=2, padx=(6, 0))
-
-        ttk.Label(lf_ops, text="Retention (zip count)").grid(row=9, column=0, sticky="w")
-        ttk.Entry(lf_ops, textvariable=self.var_backup_retention, validate="key", validatecommand=vcmd).grid(row=9, column=1, sticky="ew", padx=6)
-        ttk.Checkbutton(lf_ops, text="Include Configs", variable=self.var_backup_include_configs).grid(row=10, column=0, sticky="w")
-
-        ttk.Separator(lf_ops).grid(row=11, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Checkbutton(update_frame, text="Validate on Update", variable=self.var_validate_on_update).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            update_frame,
+            text="Runs SteamCMD validation to repair missing or corrupt files (slower updates).",
+            wraplength=380,
+            justify="left",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=(24, 0))
         ttk.Checkbutton(
-            lf_ops,
+            update_frame,
+            text="Update on startup (before starting server)",
+            variable=self.var_update_on_startup,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(
+            update_frame,
+            text="Checks for updates when launching the app and before starting the server.",
+            wraplength=380,
+            justify="left",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=(24, 0))
+
+        self.chk_auto_update_restart = ttk.Checkbutton(
+            update_frame,
             text="Auto Update & Restart",
             variable=self.var_auto_update_restart,
             command=self._sync_auto_update_scheduler
-        ).grid(row=12, column=0, sticky="w")
-        ttk.Label(lf_ops, text="Interval (minutes)").grid(row=13, column=0, sticky="w")
-        ttk.Entry(lf_ops, textvariable=self.var_auto_update_interval_min, validate="key", validatecommand=vcmd).grid(row=13, column=1, sticky="ew", padx=6)
+        )
+        self.chk_auto_update_restart.grid(row=4, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(
+            update_frame,
+            text="Schedules a daily update window and restarts the server after applying updates.",
+            wraplength=380,
+            justify="left",
+        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=(24, 0))
+        ttk.Label(update_frame, text="Schedule Time (HH:MM)").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(update_frame, textvariable=self.var_auto_update_time).grid(row=6, column=1, sticky="ew", padx=6, pady=(6, 0))
+        self.btn_auto_update_test = ttk.Button(update_frame, text="Test", command=self.auto_update_test)
+        self.btn_auto_update_test.grid(row=6, column=2, padx=(6, 0), pady=(6, 0))
+
+        backup_frame = ttk.LabelFrame(lf_ops, text="Backup", padding=8)
+        backup_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        backup_frame.columnconfigure(1, weight=1)
+
+        self.chk_backup_on_stop = ttk.Checkbutton(
+            backup_frame,
+            text="Backup on Stop",
+            variable=self.var_backup_on_stop,
+            command=self._sync_backup_label_texts,
+        )
+        self.chk_backup_on_stop.grid(row=0, column=0, sticky="w")
+
+        ttk.Label(backup_frame, text="Backup Directory").grid(row=1, column=0, sticky="w")
+        ttk.Entry(backup_frame, textvariable=self.var_backup_dir).grid(row=1, column=1, sticky="ew", padx=6)
+        ttk.Button(backup_frame, text="Browse", command=self._browse_backup_dir).grid(row=1, column=2, padx=(6, 0))
+
+        ttk.Label(backup_frame, text="Retention (zip count)").grid(row=2, column=0, sticky="w")
+        ttk.Entry(backup_frame, textvariable=self.var_backup_retention, validate="key", validatecommand=vcmd).grid(row=2, column=1, sticky="ew", padx=6)
+
+        ttk.Checkbutton(
+            lf_ops,
+            text="Start server on app launch (last profile)",
+            variable=self.var_auto_start_on_launch,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
         ttk.Checkbutton(
             lf_ops,
             text="Hide GameAnalytics debug spam (console only)",
             variable=self.var_hide_gameanalytics_console_logs,
             command=self._sync_console_log_filter_state,
-        ).grid(row=14, column=0, columnspan=3, sticky="w", pady=(10, 0))
-
-        actions = ttk.Frame(self.tab_server, padding=(5, 10))
-        actions.grid(row=3, column=0, columnspan=2, sticky="ew")
-        actions.columnconfigure(9, weight=1)
-
-        self.btn_first_install = ttk.Button(actions, text="First Install", command=self.first_install)
-        self.btn_update_validate = ttk.Button(actions, text="Update / Validate", command=self.update_validate)
-        self.btn_update_restart = ttk.Button(actions, text="Update & Restart (Safe)", command=self.update_and_restart_safe)
-        self.btn_start = ttk.Button(actions, text="Start Server", command=self.start_server)
-        self.btn_stop = ttk.Button(actions, text="Stop Server (Safe)", command=self.stop_server_safe)
-        self.btn_backup_now = ttk.Button(actions, text="Backup Now", command=self.backup_now)
-        self.btn_open_app = ttk.Button(actions, text="Open App Folder", command=lambda: open_folder(self.app_base))
-        self.btn_open_server_cfg = ttk.Button(actions, text="Open Server Config", command=self.open_server_config_dir)
-
-        self.btn_first_install.grid(row=0, column=0, padx=5)
-        self.btn_update_validate.grid(row=0, column=1, padx=5)
-        self.btn_update_restart.grid(row=0, column=2, padx=5)
-        self.btn_start.grid(row=0, column=3, padx=5)
-        self.btn_stop.grid(row=0, column=4, padx=5)
-        self.btn_backup_now.grid(row=0, column=5, padx=5)
-        self.btn_open_app.grid(row=0, column=6, padx=5)
-        self.btn_open_server_cfg.grid(row=0, column=7, padx=5)
-
-        ttk.Label(actions, textvariable=self.var_status, anchor="e").grid(row=0, column=9, sticky="e")
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
         # ---------------- Advanced Start Args tab ----------------
         self.tab_adv.columnconfigure(0, weight=1)
@@ -3847,6 +3995,11 @@ class ServerManagerApp:
             text='ServerPlatform: PC+XSX+WINGDK',
             variable=self.var_server_platform_crossplay
         ).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(
+            lf_platform,
+            text="Enable BattlEye",
+            variable=self.var_enable_battleye
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
         lf_dinos = ttk.LabelFrame(self.tab_adv, text="Dinosaur Settings (mutual exclusive)", padding=10)
         lf_dinos.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
@@ -3868,8 +4021,21 @@ class ServerManagerApp:
         ttk.Checkbutton(lf_logs, text="servergamelogincludetribelogs", variable=self.var_log_servergamelogincludetribelogs).grid(row=1, column=0, sticky="w")
         ttk.Checkbutton(lf_logs, text="ServerRCONOutputTribeLogs", variable=self.var_log_serverrconoutputtribelogs).grid(row=2, column=0, sticky="w")
 
+        lf_runtime = ttk.LabelFrame(self.tab_adv, text="Mods & RCON", padding=10)
+        lf_runtime.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
+        lf_runtime.columnconfigure(1, weight=1)
+
+        ttk.Checkbutton(lf_runtime, text="Automanaged Mods", variable=self.var_automanaged_mods).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(lf_runtime, text="Enable RCON", variable=self.var_enable_rcon).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        ttk.Label(lf_runtime, text="RCON Host").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(lf_runtime, textvariable=self.var_rcon_host).grid(row=2, column=1, sticky="ew", padx=6, pady=(6, 0))
+
+        ttk.Label(lf_runtime, text="RCON Port").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(lf_runtime, textvariable=self.var_rcon_port, validate="key", validatecommand=vcmd).grid(row=3, column=1, sticky="ew", padx=6, pady=(6, 0))
+
         lf_mech = ttk.LabelFrame(self.tab_adv, text="Mechanics / Performance", padding=10)
-        lf_mech.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        lf_mech.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
 
         mech_items = [
             ("DisableCustomCosmetics", self.var_m_disablecustomcosmetics),
@@ -3887,6 +4053,13 @@ class ServerManagerApp:
         ]
         for i, (label, var) in enumerate(mech_items):
             ttk.Checkbutton(lf_mech, text=label, variable=var).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 14), pady=2)
+
+        lf_tools = ttk.LabelFrame(self.tab_adv, text="Folders", padding=10)
+        lf_tools.grid(row=3, column=1, sticky="nsew", padx=5, pady=5)
+        self.btn_open_app = ttk.Button(lf_tools, text="Open App Folder", command=lambda: open_folder(self.app_base))
+        self.btn_open_server_cfg = ttk.Button(lf_tools, text="Open Server Config", command=self.open_server_config_dir)
+        self.btn_open_app.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.btn_open_server_cfg.grid(row=1, column=0, sticky="ew")
 
         # ---------------- RCON tab ----------------
         self.tab_rcon.columnconfigure(0, weight=1)
@@ -4156,6 +4329,7 @@ class ServerManagerApp:
 
     def _apply_global_cfg_to_vars(self, cfg: GlobalConfig) -> None:
         self.var_steamcmd_dir.set(cfg.steamcmd_dir)
+        self.var_auto_start_on_launch.set(cfg.start_on_startup)
 
     def _apply_cfg_to_vars(self, cfg: AppConfig) -> None:
         self.var_server_dir.set(cfg.server_dir)
@@ -4201,12 +4375,16 @@ class ServerManagerApp:
         self.var_discord_mention_map_json.set(cfg.discord_mention_map_json)
 
         self.var_backup_on_stop.set(cfg.backup_on_stop)
-        self.var_backup_dir.set(cfg.backup_dir)
+        backup_dir = (cfg.backup_dir or "").strip()
+        default_backup_dir = str(self.app_base / BACKUP_DIR_NAME)
+        if backup_dir and os.path.normcase(os.path.normpath(backup_dir)) == os.path.normcase(os.path.normpath(default_backup_dir)):
+            backup_dir = ""
+        self.var_backup_dir.set(backup_dir)
         self.var_backup_retention.set(str(cfg.backup_retention))
-        self.var_backup_include_configs.set(cfg.backup_include_configs)
 
         self.var_auto_update_restart.set(cfg.auto_update_restart)
-        self.var_auto_update_interval_min.set(str(cfg.auto_update_interval_min))
+        self.var_auto_update_time.set(cfg.auto_update_time or DEFAULT_SCHEDULE_TIME)
+        self.var_update_on_startup.set(cfg.update_on_startup)
 
         self.var_hide_gameanalytics_console_logs.set(bool(cfg.hide_gameanalytics_console_logs))
         self._sync_console_log_filter_state()
@@ -4287,10 +4465,11 @@ class ServerManagerApp:
         cfg.backup_on_stop = bool(self.var_backup_on_stop.get())
         cfg.backup_dir = self.var_backup_dir.get().strip()
         cfg.backup_retention = safe_int(self.var_backup_retention.get(), 20) or 20
-        cfg.backup_include_configs = bool(self.var_backup_include_configs.get())
+        cfg.backup_include_configs = True
 
         cfg.auto_update_restart = bool(self.var_auto_update_restart.get())
-        cfg.auto_update_interval_min = safe_int(self.var_auto_update_interval_min.get(), 360) or 360
+        cfg.auto_update_time = normalize_time_hhmm(self.var_auto_update_time.get(), DEFAULT_SCHEDULE_TIME)
+        cfg.update_on_startup = bool(self.var_update_on_startup.get())
 
         cfg.hide_gameanalytics_console_logs = bool(self.var_hide_gameanalytics_console_logs.get())
 
@@ -4334,6 +4513,7 @@ class ServerManagerApp:
         cfg = copy.deepcopy(self.global_cfg) if isinstance(self.global_cfg, GlobalConfig) else GlobalConfig()
         cfg.schema_version = GlobalConfig().schema_version
         cfg.steamcmd_dir = self.var_steamcmd_dir.get().strip() or DEFAULT_STEAMCMD_DIR
+        cfg.start_on_startup = bool(self.var_auto_start_on_launch.get())
         self._validate_global_cfg(cfg)
         return cfg
 
@@ -4350,8 +4530,8 @@ class ServerManagerApp:
         if not (1 <= int(cfg.max_players) <= 255):
             raise ValueError("MaxPlayers out of range (1..255).")
 
-        if cfg.auto_update_interval_min < 10:
-            raise ValueError("Auto update interval must be >= 10 minutes.")
+        if cfg.auto_update_restart and parse_time_hhmm(cfg.auto_update_time) is None:
+            raise ValueError("Auto update time must be in HH:MM (24h) format.")
 
     def _validate_global_cfg(self, cfg: GlobalConfig) -> None:
         if not cfg.steamcmd_dir.strip():
@@ -4364,7 +4544,7 @@ class ServerManagerApp:
             self._schedule_autosave()
 
         vars_to_watch = [
-            self.var_steamcmd_dir, self.var_server_dir,
+            self.var_steamcmd_dir, self.var_auto_start_on_launch, self.var_server_dir,
             self.var_map_preset, self.var_map_custom, self.var_server_name,
             self.var_port, self.var_query_port, self.var_max_players,
             self.var_server_platform_crossplay,
@@ -4375,8 +4555,8 @@ class ServerManagerApp:
             self.var_discord_notify_start, self.var_discord_notify_stop, self.var_discord_notify_join,
             self.var_discord_notify_leave, self.var_discord_notify_crash, self.var_discord_include_player_id,
             self.var_discord_mention_mode, self.var_discord_mention_map_json,
-            self.var_backup_on_stop, self.var_backup_dir, self.var_backup_retention, self.var_backup_include_configs,
-            self.var_auto_update_restart, self.var_auto_update_interval_min,
+            self.var_backup_on_stop, self.var_backup_dir, self.var_backup_retention,
+            self.var_auto_update_restart, self.var_auto_update_time, self.var_update_on_startup,
             self.var_hide_gameanalytics_console_logs,
             self.var_cluster_enable, self.var_cluster_id, self.var_cluster_custom_path_enable, self.var_cluster_dir_override,
             self.var_no_transfer_from_filtering, self.var_alt_save_directory_name,
@@ -4401,6 +4581,10 @@ class ServerManagerApp:
             self.var_hide_gameanalytics_console_logs.trace_add("write", lambda *_: self._sync_console_log_filter_state())
         except Exception:
             pass
+        try:
+            self.var_backup_on_stop.trace_add("write", lambda *_: self._sync_backup_label_texts())
+        except Exception:
+            pass
 
     def _schedule_autosave(self) -> None:
         if self._autosave_after_id:
@@ -4419,7 +4603,7 @@ class ServerManagerApp:
             self._save_active_server_config(self.cfg)
             self.global_cfg = self._collect_vars_to_global_cfg()
             self.global_store.save(self.global_cfg)
-            self._set_status("Auto-saved")
+            self._set_status(f"Auto-saved at {self._status_timestamp()}")
         except Exception as e:
             self.logger.info(f"Autosave skipped: {e}")
             self._set_status(f"Config invalid: {e}")
@@ -4457,6 +4641,7 @@ class ServerManagerApp:
         self.btn_backup_now.configure(state=("disabled" if busy else "normal"))
 
         self.btn_rcon_send.configure(state=("disabled" if busy else "normal"))
+        self.btn_auto_update_test.configure(state=("disabled" if busy else "normal"))
 
         if running:
             self._set_status("Server: RUNNING")
@@ -4495,6 +4680,32 @@ class ServerManagerApp:
     def _set_status(self, text: str) -> None:
         self.var_status.set(text)
 
+    def _status_timestamp(self) -> str:
+        return datetime.now().strftime("%H:%M:%S")
+
+    def _set_backup_status(self, backup_path: Optional[Path], label: str) -> None:
+        if backup_path:
+            self._set_status(f"{label}: {backup_path.name}")
+        else:
+            self._set_status(f"{label}: skipped (Saved folder missing)")
+
+    def _sync_backup_label_texts(self) -> None:
+        backup_enabled = bool(self.var_backup_on_stop.get())
+        auto_update_text = "Auto Update & Restart"
+        if backup_enabled:
+            auto_update_text += " (Backup on Stop)"
+        update_restart_text = "Update / Restart (Safe)"
+        if backup_enabled:
+            update_restart_text += " + Backup"
+        try:
+            self.chk_auto_update_restart.configure(text=auto_update_text)
+        except Exception:
+            pass
+        try:
+            self.btn_update_restart.configure(text=update_restart_text)
+        except Exception:
+            pass
+
     def _write_banner(self) -> None:
         server_cfg_path = server_config_path(self.app_base, self.active_server_id)
         self.logger.info(
@@ -4502,6 +4713,14 @@ class ServerManagerApp:
         )
         self.logger.info(f"Logs: {self.log_dir / LOG_FILE_NAME}")
         self._set_status("Ready")
+
+    def _auto_start_on_launch(self) -> None:
+        if not safe_bool(self.global_cfg.start_on_startup):
+            return
+        if self._is_busy() or self._is_server_running():
+            return
+        self.logger.info("Auto-start on launch enabled -> starting active server profile.")
+        self.start_server()
 
     def _sync_map_mode(self) -> None:
         choice = self.var_map_preset.get()
@@ -4603,19 +4822,24 @@ class ServerManagerApp:
             self.cfg = self._collect_vars_to_cfg()
             self._save_active_server_config(self.cfg)
 
-            steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
-
-            steamcmd_app_update(
-                logger=self.logger,
-                steamcmd_exe=steamcmd_exe,
-                install_dir=Path(self.cfg.server_dir),
-                app_id=ARK_ASA_APP_ID,
-                validate=True,
-                lock_root=self.app_base,
-                retries=2,
-            )
+            self._update_server_install(validate=True)
 
         self._run_task("Update / Validate", job)
+
+    def _update_server_install(self, *, validate: Optional[bool] = None) -> None:
+        steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
+        if validate is None:
+            validate = bool(self.cfg.validate_on_update)
+
+        steamcmd_app_update(
+            logger=self.logger,
+            steamcmd_exe=steamcmd_exe,
+            install_dir=Path(self.cfg.server_dir),
+            app_id=ARK_ASA_APP_ID,
+            validate=bool(validate),
+            lock_root=self.app_base,
+            retries=2,
+        )
 
     # ---------------------------------------------------------------------
     # Start / Stop / RCON
@@ -4625,12 +4849,48 @@ class ServerManagerApp:
         ensure_baseline(self.app_base, self.active_server_id, server_dir, self.logger, refresh=True)
         ensure_required_server_settings(self.cfg, self.app_base, self.active_server_id, server_dir, self.logger)
 
+    def _mark_stop_requested(self) -> None:
+        self._stop_requested.set()
+
+    def _clear_stop_requested(self) -> None:
+        self._stop_requested.clear()
+
+    def _should_auto_restart(self, exit_code: Optional[int]) -> bool:
+        if exit_code is None:
+            return False
+        if exit_code not in AUTO_RESTART_EXIT_CODES:
+            return False
+        if self._stop_requested.is_set():
+            return False
+        if self._is_busy():
+            return False
+        return True
+
+    def _auto_restart_server(self, exit_code: Optional[int]) -> None:
+        if not self._should_auto_restart(exit_code):
+            return
+        self.logger.info(f"Server exited with code {exit_code} -> auto-restart scheduled.")
+
+        def job() -> None:
+            time.sleep(AUTO_RESTART_DELAY_SEC)
+            try:
+                self.logger.info("Auto-restarting server...")
+                self._start_server_inline()
+            except Exception as e:
+                self.logger.info(f"Auto-restart failed: {type(e).__name__}: {e}")
+
+        threading.Thread(target=job, daemon=True).start()
+
     def start_server(self) -> None:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
             self._save_active_server_config(self.cfg)
 
             server_dir = Path(self.cfg.server_dir)
+            if self.cfg.update_on_startup:
+                self.logger.info("Update on startup enabled -> updating server install.")
+                self._update_server_install(validate=None)
+
             exe = ark_server_exe(server_dir)
             if not exe.exists():
                 raise FileNotFoundError(f"Server EXE not found: {exe}")
@@ -4643,6 +4903,7 @@ class ServerManagerApp:
 
             # RCON FIX: capture *runtime* values used to start this server instance
             self._capture_runtime_rcon(self.cfg)
+            self._clear_stop_requested()
 
             cmd = build_server_command(self.cfg)
             self.logger.info("Starting server...")
@@ -4693,9 +4954,14 @@ class ServerManagerApp:
                     self.logger.info(f"Server exited with code {code}")
             except Exception:
                 pass
+            with self._server_proc_lock:
+                if self._server_proc is p:
+                    self._server_proc = None
 
             # RCON FIX: server is gone -> runtime snapshot is no longer valid
             self._clear_runtime_rcon()
+
+            self._auto_restart_server(code)
 
             self._discord_stop_notifications(requested=False, exit_code=code)
 
@@ -4820,7 +5086,8 @@ class ServerManagerApp:
         self.logger.info("Server stopped.")
 
         if self.cfg.backup_on_stop:
-            backup_server(self.cfg, self.app_base, self.logger)
+            backup_path = backup_server(self.cfg, self.app_base, self.logger)
+            self._ui(lambda: self._set_backup_status(backup_path, label="Backup on stop"))
 
         restore_baseline_to_server(self.app_base, self.active_server_id, Path(self.cfg.server_dir), self.logger)
         if not inline:
@@ -4832,6 +5099,7 @@ class ServerManagerApp:
             self._save_active_server_config(self.cfg)
             was_running = self._is_server_running()
             if was_running:
+                self._mark_stop_requested()
                 self._discord_request_stop()
             self._stop_server_impl(inline=False)
             if was_running:
@@ -4846,26 +5114,24 @@ class ServerManagerApp:
 
             if self._is_server_running():
                 self.logger.info("Server running -> performing safe stop before update.")
+                self._mark_stop_requested()
                 self._discord_request_stop()
                 self._stop_server_impl(inline=True)
                 self._discord_stop_notifications(requested=True)
 
-            steamcmd_exe = ensure_steamcmd(self.global_cfg.steamcmd_dir, self.logger)
-
-            steamcmd_app_update(
-                logger=self.logger,
-                steamcmd_exe=steamcmd_exe,
-                install_dir=Path(self.cfg.server_dir),
-                app_id=ARK_ASA_APP_ID,
-                validate=bool(self.cfg.validate_on_update),
-                lock_root=self.app_base,
-                retries=2,
-            )
+            self._update_server_install(validate=None)
 
             self.logger.info("Restarting server after update...")
             self._start_server_inline()
 
         self._run_task("Update & Restart", job)
+
+    def auto_update_test(self) -> None:
+        if self._is_busy():
+            messagebox.showwarning("Auto Update Test", "App is busy. Try again when ready.")
+            return
+        self.logger.info("Auto update test triggered -> Update / Restart (Safe).")
+        self.update_and_restart_safe()
 
     def _start_server_inline(self) -> None:
         server_dir = Path(self.cfg.server_dir)
@@ -4881,6 +5147,7 @@ class ServerManagerApp:
 
         # RCON FIX: capture runtime values for this running instance
         self._capture_runtime_rcon(self.cfg)
+        self._clear_stop_requested()
 
         cmd = build_server_command(self.cfg)
         self.logger.info("Starting server (inline)...")
@@ -4909,7 +5176,8 @@ class ServerManagerApp:
         def job() -> None:
             self.cfg = self._collect_vars_to_cfg()
             self._save_active_server_config(self.cfg)
-            backup_server(self.cfg, self.app_base, self.logger)
+            backup_path = backup_server(self.cfg, self.app_base, self.logger)
+            self._ui(lambda: self._set_backup_status(backup_path, label="Backup created"))
 
         self._run_task("Backup", job)
 
@@ -4924,7 +5192,9 @@ class ServerManagerApp:
             return
 
         enabled = bool(self.cfg.auto_update_restart)
-        if enabled and (self._auto_update_thread is None or not self._auto_update_thread.is_alive()):
+        if enabled:
+            if self._auto_update_thread is not None and self._auto_update_thread.is_alive():
+                self._auto_update_stop.set()
             self._auto_update_stop.clear()
             self._auto_update_thread = threading.Thread(target=self._auto_update_loop, daemon=True)
             self._auto_update_thread.start()
@@ -4935,11 +5205,14 @@ class ServerManagerApp:
 
     def _auto_update_loop(self) -> None:
         while not self._auto_update_stop.is_set():
-            interval = max(10, int(self.cfg.auto_update_interval_min))
-            for _ in range(interval):
-                if self._auto_update_stop.is_set():
-                    return
-                time.sleep(60)
+            schedule_time = parse_time_hhmm(self.cfg.auto_update_time or DEFAULT_SCHEDULE_TIME) or parse_time_hhmm(DEFAULT_SCHEDULE_TIME)
+            if schedule_time is None:
+                schedule_time = dt_time(hour=3, minute=0)
+            now = datetime.now()
+            next_run = next_scheduled_datetime(now, schedule_time)
+            wait_sec = max(1.0, (next_run - now).total_seconds())
+            if self._auto_update_stop.wait(timeout=wait_sec):
+                return
 
             if self._auto_update_stop.is_set():
                 return
