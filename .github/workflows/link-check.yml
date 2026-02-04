@@ -23,7 +23,7 @@ jobs:
     steps:
       # 1) Fetch repository contents so Lychee can scan files.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # 2) Scan links inside README + GitHub Pages files under /docs.
       #    - Accept common non-fatal statuses:
