@@ -136,6 +136,39 @@ THEME_COLORS = {
 # PATH / ICON HELPERS
 # =============================================================================
 
+
+@dataclass(frozen=True)
+class RuntimeCliOptions:
+    no_admin_prompt: bool = False
+
+
+def parse_runtime_cli_options(argv: List[str]) -> RuntimeCliOptions:
+    """
+    Parses lightweight runtime flags before GUI/bootstrap starts.
+
+    Supported flags:
+      --no-admin-prompt
+      -no-admin
+    """
+    no_admin_prompt = False
+    unknown_flags: List[str] = []
+
+    for raw in argv:
+        arg = (raw or "").strip().lower()
+        if arg in {"--no-admin-prompt", "-no-admin"}:
+            no_admin_prompt = True
+            continue
+        if arg.startswith("-"):
+            unknown_flags.append(raw)
+
+    if unknown_flags:
+        logging.getLogger(APP_NAME).warning(
+            "Ignoring unknown CLI flags: %s",
+            ", ".join(unknown_flags),
+        )
+
+    return RuntimeCliOptions(no_admin_prompt=no_admin_prompt)
+
 def resource_path(relative: str) -> str:
     base = getattr(sys, "_MEIPASS", None)  # type: ignore[name-defined]
     if base:
@@ -5509,7 +5542,9 @@ class ServerManagerApp:
 # ENTRYPOINT
 # =============================================================================
 
-def launch_gui() -> None:
+def launch_gui(cli_options: Optional[RuntimeCliOptions] = None) -> None:
+    opts = cli_options or RuntimeCliOptions()
+
     set_windows_appusermodel_id(APP_USERMODEL_ID)
     configure_dpi_awareness()
 
@@ -5520,7 +5555,7 @@ def launch_gui() -> None:
 
     apply_window_icon(root)
 
-    if os.name == "nt" and not is_admin():
+    if os.name == "nt" and not is_admin() and not opts.no_admin_prompt:
         try:
             if messagebox.askyesno(
                 "Administrator rights recommended",
@@ -5538,7 +5573,7 @@ def launch_gui() -> None:
         app_base = resolve_storage_root()
         ensure_dir(app_base)
     except PermissionError as e:
-        if os.name == "nt" and not is_admin():
+        if os.name == "nt" and not is_admin() and not opts.no_admin_prompt:
             try:
                 if messagebox.askyesno(
                     "Shared storage requires admin",
@@ -5558,4 +5593,4 @@ def launch_gui() -> None:
 
 
 if __name__ == "__main__":
-    launch_gui()
+    launch_gui(parse_runtime_cli_options(sys.argv[1:]))
