@@ -94,14 +94,31 @@ This manager separates *edit time* and *runtime*:
 
 ### CLI flags
 - `--no-admin-prompt` (alias: `-no-admin`)
-  - skips the "Administrator rights recommended" dialog
-  - starts directly in non-admin/limited mode
-  - no UAC relaunch attempt is made
+  - Skips the "Administrator rights recommended" dialog
+  - Starts directly in non-admin/limited mode
+  - No UAC relaunch attempt is made
 
-For Windows autostart shortcuts, use:
+### Windows autostart
+Startup folder runs **at user logon**. For a reliable autostart, prefer **Task Scheduler**.
+
+Shortcut (Startup folder):
 ```text
 "C:\Path\ARK-ASA-Manager.exe" --no-admin-prompt
 ```
+
+Task Scheduler (recommended, GUI visible):
+- Trigger: **At log on**
+- General: **Run only when user is logged on**
+- Action:
+  - Program/script:
+    ```text
+    C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+    ```
+  - Add arguments (replace the paths):
+    ```text
+    -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "Start-Process -FilePath '<EXE_FULL_PATH>' -ArgumentList '--no-admin-prompt'"
+    ```
+
 ---
 
 Option B: Build EXE (PyInstaller)
