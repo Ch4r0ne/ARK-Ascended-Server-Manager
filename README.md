@@ -91,6 +91,17 @@ This manager separates *edit time* and *runtime*:
 - Time-based update/validate + safe restart
 - Skips triggers while the app is busy
 - Add the 'Auto Start' option to the last profile on startup.
+
+### CLI flags
+- `--no-admin-prompt` (alias: `-no-admin`)
+  - skips the "Administrator rights recommended" dialog
+  - starts directly in non-admin/limited mode
+  - no UAC relaunch attempt is made
+
+For Windows autostart shortcuts, use:
+```text
+"C:\Path\ARK-ASA-Manager.exe" --no-admin-prompt
+```
 ---
 
 Option B: Build EXE (PyInstaller)
