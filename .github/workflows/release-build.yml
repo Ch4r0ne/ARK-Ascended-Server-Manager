@@ -103,7 +103,7 @@ jobs:
           "sha_path=dist/ARK-ASA-Manager.exe.sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload artifact (workflow)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ARK-ASA-Manager-windows
           path: |
