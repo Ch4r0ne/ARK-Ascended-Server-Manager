@@ -972,6 +972,7 @@ class GlobalConfig:
     steamcmd_dir: str = DEFAULT_STEAMCMD_DIR
     last_selected_server_id: str = ""
     start_on_startup: bool = False
+    language: str = "en"
     servers: List[ServerRef] = field(default_factory=list)
 
 
@@ -1227,13 +1228,14 @@ class GlobalConfigStore:
             migrated = True
             return GlobalConfigLoadResult(cfg=cfg, migrated=migrated, warnings=warnings)
 
-        known = {"schema_version", "steamcmd_dir", "last_selected_server_id", "start_on_startup", "servers"}
+        known = {"schema_version", "steamcmd_dir", "last_selected_server_id", "start_on_startup", "language", "servers"}
         self._extra = {k: v for k, v in data.items() if k not in known}
 
         cfg.schema_version = safe_int(data.get("schema_version", cfg.schema_version), cfg.schema_version)
         cfg.steamcmd_dir = str(data.get("steamcmd_dir") or cfg.steamcmd_dir)
         cfg.last_selected_server_id = str(data.get("last_selected_server_id") or "")
         cfg.start_on_startup = safe_bool(data.get("start_on_startup"), cfg.start_on_startup)
+        cfg.language = str(data.get("language") or cfg.language or "en")
 
         servers_raw = data.get("servers")
         if isinstance(servers_raw, list):
@@ -3060,6 +3062,12 @@ class ServerManagerApp:
 
         self._server_id_order: List[str] = []
 
+        self._translations: Dict[str, str] = {}
+        try:
+            self._load_translations(getattr(self, "global_cfg", None).language if hasattr(self, "global_cfg") else "en")
+        except Exception:
+            self._translations = {}
+
         self._init_vars()
         self._build_layout()
         self._apply_text_theme()
@@ -3103,6 +3111,72 @@ class ServerManagerApp:
         self._refresh_buttons()
         self._sync_auto_update_scheduler()
         self.root.after(800, self._auto_start_on_launch)
+
+    def _load_translations(self, lang: str) -> None:
+        base_dir = Path(resource_path("assets"))
+        lang_file = base_dir / "locales" / f"{lang}.json"
+        if not lang_file.exists():
+            lang_file = base_dir / "locales" / "en.json"
+        try:
+            raw = lang_file.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                self._translations = {str(k): str(v) for k, v in data.items()}
+            else:
+                self._translations = {}
+        except Exception:
+            self._translations = {}
+
+    def _t(self, key: str, default: str) -> str:
+        return self._translations.get(key, default)
+
+    def _on_language_changed(self) -> None:
+        try:
+            lang = self.var_language.get().strip()
+        except Exception:
+            lang = "en"
+        if not lang:
+            lang = "en"
+        self._load_translations(lang)
+        self.global_cfg.language = lang
+        try:
+            self._save_global_config(self.global_cfg)
+        except Exception:
+            pass
+        self._apply_i18n()
+
+    def _apply_i18n(self) -> None:
+        try:
+            self.root.title(self._t("app.title", APP_NAME))
+        except Exception:
+            pass
+        try:
+            self.nb.tab(self.tab_server, text=self._t("tabs.server", "Server"))
+            self.nb.tab(self.tab_adv, text=self._t("tabs.advanced", "Advanced Start Args"))
+            self.nb.tab(self.tab_rcon, text=self._t("tabs.rcon", "RCON"))
+            self.nb.tab(self.tab_discord, text=self._t("tabs.discord", "Discord"))
+            self.nb.tab(self.tab_ini, text=self._t("tabs.ini", "INI Editor"))
+        except Exception:
+            pass
+        try:
+            self.btn_first_install.configure(text=self._t("buttons.first_install", "First Install"))
+            self.btn_update_validate.configure(text=self._t("buttons.update_validate", "Update / Validate"))
+            self.btn_update_restart.configure(text=self._t("buttons.update_restart", "Update / Restart - Safe"))
+            self.btn_start.configure(text=self._t("buttons.start_server", "Start Server"))
+            self.btn_stop.configure(text=self._t("buttons.stop_server", "Stop Server (Safe)"))
+            self.btn_backup_now.configure(text=self._t("buttons.backup_now", "Backup Now"))
+        except Exception:
+            pass
+        try:
+            self.chk_auto_update_restart.configure(text=self._t("ops.auto_update_restart", "Auto Update & Restart"))
+            self.chk_backup_on_stop.configure(text=self._t("backup.backup_on_stop", "Backup on Stop"))
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "lbl_header_status"):
+                self.lbl_header_status.configure(text=self._t("header.status", "Status:"))
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------------
     # Profile / config init
@@ -3661,6 +3735,7 @@ class ServerManagerApp:
         self.var_server_profile = tk.StringVar(master=m)
         self.var_steamcmd_dir = tk.StringVar(master=m)
         self.var_server_dir = tk.StringVar(master=m)
+        self.var_language = tk.StringVar(master=m)
 
         self.var_map_preset = tk.StringVar(master=m)
         self.var_map_custom = tk.StringVar(master=m)
@@ -3776,8 +3851,13 @@ class ServerManagerApp:
 
         header = ttk.Frame(top)
         header.place(in_=self.nb, relx=1.0, x=-8, y=6, anchor="ne")
-        ttk.Label(header, text="Status:", foreground=theme["muted"]).grid(row=0, column=0, sticky="e")
-        ttk.Label(header, textvariable=self.var_status, anchor="e").grid(row=0, column=1, sticky="e", padx=(6, 0))
+        self.lbl_header_status = ttk.Label(header, text=self._t("header.status", "Status:"), foreground=theme["muted"])
+        self.lbl_header_status.grid(row=0, column=0, sticky="e")
+        ttk.Label(header, textvariable=self.var_status, anchor="e").grid(row=0, column=1, sticky="e", padx=(6, 12))
+        ttk.Label(header, text=self._t("header.language", "Language"), foreground=theme["muted"]).grid(row=0, column=2, sticky="e")
+        self.cmb_language = ttk.Combobox(header, textvariable=self.var_language, state="readonly", values=["en", "zh-CN"], width=8)
+        self.cmb_language.grid(row=0, column=3, sticky="e", padx=(6, 0))
+        self.cmb_language.bind("<<ComboboxSelected>>", lambda e: self._on_language_changed())
 
         self.tab_server = ttk.Frame(self.nb, padding=10)
         self.tab_adv = ttk.Frame(self.nb, padding=10)
@@ -3785,11 +3865,11 @@ class ServerManagerApp:
         self.tab_discord = ttk.Frame(self.nb, padding=10)
         self.tab_ini = ttk.Frame(self.nb, padding=10)
 
-        self.nb.add(self.tab_server, text="Server")
-        self.nb.add(self.tab_adv, text="Advanced Start Args")
-        self.nb.add(self.tab_rcon, text="RCON")
-        self.nb.add(self.tab_discord, text="Discord")
-        self.nb.add(self.tab_ini, text="INI Editor")
+        self.nb.add(self.tab_server, text=self._t("tabs.server", "Server"))
+        self.nb.add(self.tab_adv, text=self._t("tabs.advanced", "Advanced Start Args"))
+        self.nb.add(self.tab_rcon, text=self._t("tabs.rcon", "RCON"))
+        self.nb.add(self.tab_discord, text=self._t("tabs.discord", "Discord"))
+        self.nb.add(self.tab_ini, text=self._t("tabs.ini", "INI Editor"))
 
         # ---------------- Server tab ----------------
         self.tab_server.columnconfigure(0, weight=1)
@@ -3797,11 +3877,11 @@ class ServerManagerApp:
 
         vcmd = (self.root.register(self._validate_digits), "%P")
 
-        lf_profiles = ttk.LabelFrame(self.tab_server, text="Server Profiles", padding=10)
+        lf_profiles = ttk.LabelFrame(self.tab_server, text=self._t("profiles.title", "Server Profiles"), padding=10)
         lf_profiles.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         lf_profiles.columnconfigure(1, weight=1)
 
-        ttk.Label(lf_profiles, text="Active Server").grid(row=0, column=0, sticky="w")
+        ttk.Label(lf_profiles, text=self._t("profiles.active", "Active Server")).grid(row=0, column=0, sticky="w")
         self.cmb_server_profile = ttk.Combobox(
             lf_profiles,
             textvariable=self.var_server_profile,
@@ -3813,32 +3893,32 @@ class ServerManagerApp:
 
         profile_actions = ttk.Frame(lf_profiles)
         profile_actions.grid(row=0, column=2, sticky="e")
-        ttk.Button(profile_actions, text="Add", command=self._add_server_profile).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(profile_actions, text="Rename", command=self._rename_server_profile).grid(row=0, column=1, padx=(0, 6))
-        ttk.Button(profile_actions, text="Remove", command=self._remove_server_profile).grid(row=0, column=2)
+        ttk.Button(profile_actions, text=self._t("profiles.add", "Add"), command=self._add_server_profile).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(profile_actions, text=self._t("profiles.rename", "Rename"), command=self._rename_server_profile).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(profile_actions, text=self._t("profiles.remove", "Remove"), command=self._remove_server_profile).grid(row=0, column=2)
 
-        lf_paths = ttk.LabelFrame(self.tab_server, text="Paths", padding=10)
+        lf_paths = ttk.LabelFrame(self.tab_server, text=self._t("paths.title", "Paths"), padding=10)
         lf_paths.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         lf_paths.columnconfigure(1, weight=1)
         lf_paths.columnconfigure(4, weight=1)
 
-        ttk.Label(lf_paths, text="SteamCMD Directory").grid(row=0, column=0, sticky="w")
+        ttk.Label(lf_paths, text=self._t("paths.steamcmd", "SteamCMD Directory")).grid(row=0, column=0, sticky="w")
         ttk.Entry(lf_paths, textvariable=self.var_steamcmd_dir).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(lf_paths, text="Browse", command=self._browse_steamcmd).grid(row=0, column=2)
+        ttk.Button(lf_paths, text=self._t("buttons.browse", "Browse"), command=self._browse_steamcmd).grid(row=0, column=2)
 
-        ttk.Label(lf_paths, text="Server Install Directory").grid(row=0, column=3, sticky="w", padx=(18, 0))
+        ttk.Label(lf_paths, text=self._t("paths.serverdir", "Server Install Directory")).grid(row=0, column=3, sticky="w", padx=(18, 0))
         ttk.Entry(lf_paths, textvariable=self.var_server_dir).grid(row=0, column=4, sticky="ew", padx=6)
-        ttk.Button(lf_paths, text="Browse", command=self._browse_server_dir).grid(row=0, column=5)
+        ttk.Button(lf_paths, text=self._t("buttons.browse", "Browse"), command=self._browse_server_dir).grid(row=0, column=5)
 
-        lf_server = ttk.LabelFrame(self.tab_server, text="Server Settings", padding=10)
+        lf_server = ttk.LabelFrame(self.tab_server, text=self._t("server.title", "Server Settings"), padding=10)
         lf_server.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
         lf_server.columnconfigure(1, weight=1)
 
-        lf_ops = ttk.LabelFrame(self.tab_server, text="Operations", padding=10)
+        lf_ops = ttk.LabelFrame(self.tab_server, text=self._t("ops.title", "Operations"), padding=10)
         lf_ops.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
         lf_ops.columnconfigure(1, weight=1)
 
-        ttk.Label(lf_server, text="Map Preset").grid(row=0, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.map_preset", "Map Preset")).grid(row=0, column=0, sticky="w")
         self.cmb_map = ttk.Combobox(
             lf_server,
             textvariable=self.var_map_preset,
@@ -3848,29 +3928,29 @@ class ServerManagerApp:
         self.cmb_map.grid(row=0, column=1, sticky="ew", padx=6)
         self.cmb_map.bind("<<ComboboxSelected>>", lambda e: self._sync_map_mode())
 
-        ttk.Label(lf_server, text="Custom Map Name").grid(row=1, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.custom_map_name", "Custom Map Name")).grid(row=1, column=0, sticky="w")
         self.ent_map_custom = ttk.Entry(lf_server, textvariable=self.var_map_custom)
         self.ent_map_custom.grid(row=1, column=1, sticky="ew", padx=6)
 
-        ttk.Label(lf_server, text="Server Name").grid(row=2, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.server_name", "Server Name")).grid(row=2, column=0, sticky="w")
         ttk.Entry(lf_server, textvariable=self.var_server_name).grid(row=2, column=1, sticky="ew", padx=6)
 
-        ttk.Label(lf_server, text="Port").grid(row=3, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.port", "Port")).grid(row=3, column=0, sticky="w")
         ttk.Entry(lf_server, textvariable=self.var_port, validate="key", validatecommand=vcmd).grid(row=3, column=1, sticky="ew", padx=6)
 
-        ttk.Label(lf_server, text="Query Port").grid(row=4, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.query_port", "Query Port")).grid(row=4, column=0, sticky="w")
         ttk.Entry(lf_server, textvariable=self.var_query_port, validate="key", validatecommand=vcmd).grid(row=4, column=1, sticky="ew", padx=6)
 
-        ttk.Label(lf_server, text="Max Players").grid(row=5, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.max_players", "Max Players")).grid(row=5, column=0, sticky="w")
         ttk.Entry(lf_server, textvariable=self.var_max_players, validate="key", validatecommand=vcmd).grid(row=5, column=1, sticky="ew", padx=6)
 
-        ttk.Label(lf_server, text="Join Password").grid(row=6, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.join_password", "Join Password")).grid(row=6, column=0, sticky="w")
         ttk.Entry(lf_server, textvariable=self.var_join_password).grid(row=6, column=1, sticky="ew", padx=6)
 
-        ttk.Label(lf_server, text="Admin Password (RCON/Admin)").grid(row=7, column=0, sticky="w")
+        ttk.Label(lf_server, text=self._t("labels.admin_password", "Admin Password (RCON/Admin)")).grid(row=7, column=0, sticky="w")
         ttk.Entry(lf_server, textvariable=self.var_admin_password).grid(row=7, column=1, sticky="ew", padx=6)
 
-        ttk.Label(lf_server, text="Mods (comma separated)").grid(row=8, column=0, sticky="nw", pady=(6, 0))
+        ttk.Label(lf_server, text=self._t("labels.mods", "Mods (comma separated)")).grid(row=8, column=0, sticky="nw", pady=(6, 0))
         mods_frame = ttk.Frame(lf_server)
         mods_frame.grid(row=8, column=1, sticky="ew", padx=6, pady=(6, 0))
         mods_frame.columnconfigure(0, weight=1)
@@ -3893,14 +3973,11 @@ class ServerManagerApp:
         xscroll.grid(row=1, column=0, sticky="ew", pady=(2, 0))
         self.txt_mods.configure(xscrollcommand=xscroll.set)
 
-        ttk.Label(lf_server, text="Custom Server Arguments (optional)").grid(row=9, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(lf_server, text=self._t("labels.custom_args", "Custom Server Arguments (optional)")).grid(row=9, column=0, sticky="w", pady=(8, 0))
         self.ent_custom_start_args = ttk.Entry(lf_server, textvariable=self.var_custom_start_args)
         self.ent_custom_start_args.grid(row=9, column=1, sticky="ew", padx=6, pady=(8, 0))
         ttk.Label(lf_server, text="").grid(row=10, column=1, sticky="w", padx=6, pady=(2, 0))
-        self._custom_args_tooltip = HoverTooltip(
-            self.ent_custom_start_args,
-            "Example: -Parameter1 -Parameter2",
-        )
+        self._custom_args_tooltip = HoverTooltip(self.ent_custom_start_args, self._t("tips.custom_args_example", "Example: -Parameter1 -Parameter2"))
 
         actions = ttk.Frame(lf_server, padding=(0, 10, 0, 0))
         actions.grid(row=11, column=0, columnspan=2, sticky="ew")
@@ -3908,12 +3985,12 @@ class ServerManagerApp:
         actions.columnconfigure(1, weight=1)
         actions.columnconfigure(2, weight=1)
 
-        self.btn_first_install = ttk.Button(actions, text="First Install", command=self.first_install)
-        self.btn_update_validate = ttk.Button(actions, text="Update / Validate", command=self.update_validate)
-        self.btn_update_restart = ttk.Button(actions, text="Update / Restart (Safe)", command=self.update_and_restart_safe)
-        self.btn_start = ttk.Button(actions, text="Start Server", command=self.start_server)
-        self.btn_stop = ttk.Button(actions, text="Stop Server (Safe)", command=self.stop_server_safe)
-        self.btn_backup_now = ttk.Button(actions, text="Backup Now", command=self.backup_now)
+        self.btn_first_install = ttk.Button(actions, text=self._t("buttons.first_install", "First Install"), command=self.first_install)
+        self.btn_update_validate = ttk.Button(actions, text=self._t("buttons.update_validate", "Update / Validate"), command=self.update_validate)
+        self.btn_update_restart = ttk.Button(actions, text=self._t("buttons.update_restart", "Update / Restart (Safe)"), command=self.update_and_restart_safe)
+        self.btn_start = ttk.Button(actions, text=self._t("buttons.start_server", "Start Server"), command=self.start_server)
+        self.btn_stop = ttk.Button(actions, text=self._t("buttons.stop_server", "Stop Server (Safe)"), command=self.stop_server_safe)
+        self.btn_backup_now = ttk.Button(actions, text=self._t("buttons.backup_now", "Backup Now"), command=self.backup_now)
 
         self.btn_first_install.grid(row=0, column=0, padx=5, pady=(0, 6), sticky="ew")
         self.btn_stop.grid(row=0, column=1, padx=5, pady=(0, 6), sticky="ew")
@@ -3922,32 +3999,22 @@ class ServerManagerApp:
         self.btn_update_restart.grid(row=1, column=1, padx=5, sticky="ew")
         self.btn_backup_now.grid(row=1, column=2, padx=5, sticky="ew")
 
-        update_frame = ttk.LabelFrame(lf_ops, text="Update Options", padding=8)
+        update_frame = ttk.LabelFrame(lf_ops, text=self._t("ops.update_options", "Update Options"), padding=8)
         update_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         update_frame.columnconfigure(1, weight=1)
 
-        ttk.Checkbutton(update_frame, text="Validate on Update", variable=self.var_validate_on_update).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            update_frame,
-            text="Runs SteamCMD validation to repair missing or corrupt files (slower updates).",
-            wraplength=380,
-            justify="left",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=(24, 0))
+        ttk.Checkbutton(update_frame, text=self._t("ops.validate_on_update", "Validate on Update"), variable=self.var_validate_on_update).grid(row=0, column=0, sticky="w")
+        ttk.Label(update_frame, text=self._t("ops.validate_desc", "Runs SteamCMD validation to repair missing or corrupt files (slower updates)."), wraplength=380, justify="left").grid(row=1, column=0, columnspan=2, sticky="w", padx=(24, 0))
         ttk.Checkbutton(
             update_frame,
-            text="Update on startup (before starting server)",
+            text=self._t("ops.update_on_startup", "Update on startup (before starting server)"),
             variable=self.var_update_on_startup,
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
-        ttk.Label(
-            update_frame,
-            text="Checks for updates when launching the app and before starting the server.",
-            wraplength=380,
-            justify="left",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=(24, 0))
+        ttk.Label(update_frame, text=self._t("ops.update_desc", "Checks for updates when launching the app and before starting the server."), wraplength=380, justify="left").grid(row=3, column=0, columnspan=2, sticky="w", padx=(24, 0))
 
         self.chk_auto_update_restart = ttk.Checkbutton(
             update_frame,
-            text="Auto Update & Restart",
+            text=self._t("ops.auto_update_restart", "Auto Update & Restart"),
             variable=self.var_auto_update_restart,
             command=self._sync_auto_update_scheduler
         )
@@ -3958,83 +4025,89 @@ class ServerManagerApp:
             wraplength=380,
             justify="left",
         ).grid(row=5, column=0, columnspan=2, sticky="w", padx=(24, 0))
-        ttk.Label(update_frame, text="Schedule Time (HH:MM)").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(update_frame, text=self._t("ops.schedule_time", "Schedule Time (HH:MM)")).grid(row=6, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(update_frame, textvariable=self.var_auto_update_time).grid(row=6, column=1, sticky="ew", padx=6, pady=(6, 0))
-        self.btn_auto_update_test = ttk.Button(update_frame, text="Test", command=self.auto_update_test)
+        self.btn_auto_update_test = ttk.Button(update_frame, text=self._t("ops.test", "Test"), command=self.auto_update_test)
         self.btn_auto_update_test.grid(row=6, column=2, padx=(6, 0), pady=(6, 0))
 
-        backup_frame = ttk.LabelFrame(lf_ops, text="Backup", padding=8)
+        backup_frame = ttk.LabelFrame(lf_ops, text=self._t("backup.title", "Backup"), padding=8)
         backup_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         backup_frame.columnconfigure(1, weight=1)
 
         self.chk_backup_on_stop = ttk.Checkbutton(
             backup_frame,
-            text="Backup on Stop",
+            text=self._t("backup.backup_on_stop", "Backup on Stop"),
             variable=self.var_backup_on_stop,
             command=self._sync_backup_label_texts,
         )
         self.chk_backup_on_stop.grid(row=0, column=0, sticky="w")
 
-        ttk.Label(backup_frame, text="Backup Directory").grid(row=1, column=0, sticky="w")
+        ttk.Label(backup_frame, text=self._t("backup.dir", "Backup Directory")).grid(row=1, column=0, sticky="w")
         ttk.Entry(backup_frame, textvariable=self.var_backup_dir).grid(row=1, column=1, sticky="ew", padx=6)
-        ttk.Button(backup_frame, text="Browse", command=self._browse_backup_dir).grid(row=1, column=2, padx=(6, 0))
+        ttk.Button(backup_frame, text=self._t("buttons.browse", "Browse"), command=self._browse_backup_dir).grid(row=1, column=2, padx=(6, 0))
 
-        ttk.Label(backup_frame, text="Retention (zip count)").grid(row=2, column=0, sticky="w")
+        ttk.Label(backup_frame, text=self._t("backup.retention", "Retention (zip count)")).grid(row=2, column=0, sticky="w")
         ttk.Entry(backup_frame, textvariable=self.var_backup_retention, validate="key", validatecommand=vcmd).grid(row=2, column=1, sticky="ew", padx=6)
 
         ttk.Checkbutton(
             lf_ops,
-            text="Start server on app launch (last profile)",
+            text=self._t("ops.autostart", "Start server on app launch (last profile)"),
             variable=self.var_auto_start_on_launch,
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
         ttk.Checkbutton(
             lf_ops,
-            text="Hide GameAnalytics debug spam (console only)",
+            text=self._t("console.suppress", "Hide GameAnalytics debug spam (console only)"),
             variable=self.var_hide_gameanalytics_console_logs,
             command=self._sync_console_log_filter_state,
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+        try:
+            self.var_language.set(getattr(self.global_cfg, "language", "en") or "en")
+        except Exception:
+            self.var_language.set("en")
+        self._apply_i18n()
 
         # ---------------- Advanced Start Args tab ----------------
         self.tab_adv.columnconfigure(0, weight=1)
         self.tab_adv.columnconfigure(1, weight=1)
 
-        lf_cluster = ttk.LabelFrame(self.tab_adv, text="Cluster Configuration", padding=10)
+        lf_cluster = ttk.LabelFrame(self.tab_adv, text=self._t("adv.cluster.title", "Cluster Configuration"), padding=10)
         lf_cluster.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         lf_cluster.columnconfigure(1, weight=1)
 
-        ttk.Checkbutton(lf_cluster, text="Enable Cluster", variable=self.var_cluster_enable).grid(row=0, column=0, sticky="w")
-        ttk.Label(lf_cluster, text="Cluster ID").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(lf_cluster, text=self._t("adv.cluster.enable", "Enable Cluster"), variable=self.var_cluster_enable).grid(row=0, column=0, sticky="w")
+        ttk.Label(lf_cluster, text=self._t("adv.cluster.id", "Cluster ID")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(lf_cluster, textvariable=self.var_cluster_id).grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
 
-        ttk.Checkbutton(lf_cluster, text="NoTransferFromFiltering", variable=self.var_no_transfer_from_filtering).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(lf_cluster, text=self._t("adv.cluster.no_transfer", "NoTransferFromFiltering"), variable=self.var_no_transfer_from_filtering).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
-        ttk.Checkbutton(lf_cluster, text="Enable Cluster Custom Path", variable=self.var_cluster_custom_path_enable).grid(row=3, column=0, sticky="w", pady=(8, 0))
-        ttk.Label(lf_cluster, text="ClusterDirOverride Path").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(lf_cluster, text=self._t("adv.cluster.custom_path_enable", "Enable Cluster Custom Path"), variable=self.var_cluster_custom_path_enable).grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(lf_cluster, text=self._t("adv.cluster.dir_override", "ClusterDirOverride Path")).grid(row=4, column=0, sticky="w", pady=(6, 0))
         path_row = ttk.Frame(lf_cluster)
         path_row.grid(row=4, column=1, sticky="ew", padx=6, pady=(6, 0))
         path_row.columnconfigure(0, weight=1)
         ttk.Entry(path_row, textvariable=self.var_cluster_dir_override).grid(row=0, column=0, sticky="ew")
-        ttk.Button(path_row, text="Browse", command=self._browse_cluster_dir).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(path_row, text=self._t("buttons.browse", "Browse"), command=self._browse_cluster_dir).grid(row=0, column=1, padx=(6, 0))
 
-        ttk.Label(lf_cluster, text="AltSaveDirectoryName (optional, per instance)").grid(row=5, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(lf_cluster, text=self._t("adv.cluster.alt_save_dir", "AltSaveDirectoryName (optional, per instance)")).grid(row=5, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(lf_cluster, textvariable=self.var_alt_save_directory_name).grid(row=5, column=1, sticky="ew", padx=6, pady=(8, 0))
 
         # moved: ServerPlatform
-        lf_platform = ttk.LabelFrame(self.tab_adv, text="Platform / Crossplay", padding=10)
+        lf_platform = ttk.LabelFrame(self.tab_adv, text=self._t("adv.platform.title", "Platform / Crossplay"), padding=10)
         lf_platform.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         ttk.Checkbutton(
             lf_platform,
-            text='ServerPlatform: PC+XSX+WINGDK',
+            text=self._t("adv.platform.server_platform", "ServerPlatform: PC+XSX+WINGDK"),
             variable=self.var_server_platform_crossplay
         ).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(
             lf_platform,
-            text="Enable BattlEye",
+            text=self._t("adv.platform.enable_battleye", "Enable BattlEye"),
             variable=self.var_enable_battleye
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
-        lf_dinos = ttk.LabelFrame(self.tab_adv, text="Dinosaur Settings (mutual exclusive)", padding=10)
+        lf_dinos = ttk.LabelFrame(self.tab_adv, text=self._t("adv.dinos.title", "Dinosaur Settings (mutual exclusive)"), padding=10)
         lf_dinos.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
         dino_opts = [
@@ -4048,26 +4121,26 @@ class ServerManagerApp:
         for i, (label, val) in enumerate(dino_opts):
             ttk.Radiobutton(lf_dinos, text=label, variable=self.var_dino_mode, value=val).grid(row=i, column=0, sticky="w")
 
-        lf_logs = ttk.LabelFrame(self.tab_adv, text="Logs", padding=10)
+        lf_logs = ttk.LabelFrame(self.tab_adv, text=self._t("adv.logs.title", "Logs"), padding=10)
         lf_logs.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
         ttk.Checkbutton(lf_logs, text="servergamelog", variable=self.var_log_servergamelog).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(lf_logs, text="servergamelogincludetribelogs", variable=self.var_log_servergamelogincludetribelogs).grid(row=1, column=0, sticky="w")
         ttk.Checkbutton(lf_logs, text="ServerRCONOutputTribeLogs", variable=self.var_log_serverrconoutputtribelogs).grid(row=2, column=0, sticky="w")
 
-        lf_runtime = ttk.LabelFrame(self.tab_adv, text="Mods & RCON", padding=10)
+        lf_runtime = ttk.LabelFrame(self.tab_adv, text=self._t("adv.runtime.title", "Mods & RCON"), padding=10)
         lf_runtime.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
         lf_runtime.columnconfigure(1, weight=1)
 
-        ttk.Checkbutton(lf_runtime, text="Automanaged Mods", variable=self.var_automanaged_mods).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(lf_runtime, text="Enable RCON", variable=self.var_enable_rcon).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(lf_runtime, text=self._t("adv.runtime.automanaged_mods", "Automanaged Mods"), variable=self.var_automanaged_mods).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(lf_runtime, text=self._t("adv.runtime.enable_rcon", "Enable RCON"), variable=self.var_enable_rcon).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
-        ttk.Label(lf_runtime, text="RCON Host").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(lf_runtime, text=self._t("adv.runtime.rcon_host", "RCON Host")).grid(row=2, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(lf_runtime, textvariable=self.var_rcon_host).grid(row=2, column=1, sticky="ew", padx=6, pady=(6, 0))
 
-        ttk.Label(lf_runtime, text="RCON Port").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(lf_runtime, text=self._t("adv.runtime.rcon_port", "RCON Port")).grid(row=3, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(lf_runtime, textvariable=self.var_rcon_port, validate="key", validatecommand=vcmd).grid(row=3, column=1, sticky="ew", padx=6, pady=(6, 0))
 
-        lf_mech = ttk.LabelFrame(self.tab_adv, text="Mechanics / Performance", padding=10)
+        lf_mech = ttk.LabelFrame(self.tab_adv, text=self._t("adv.mech.title", "Mechanics / Performance"), padding=10)
         lf_mech.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
 
         mech_items = [
@@ -4087,77 +4160,77 @@ class ServerManagerApp:
         for i, (label, var) in enumerate(mech_items):
             ttk.Checkbutton(lf_mech, text=label, variable=var).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 14), pady=2)
 
-        lf_tools = ttk.LabelFrame(self.tab_adv, text="Folders", padding=10)
+        lf_tools = ttk.LabelFrame(self.tab_adv, text=self._t("adv.folders.title", "Folders"), padding=10)
         lf_tools.grid(row=3, column=1, sticky="nsew", padx=5, pady=5)
-        self.btn_open_app = ttk.Button(lf_tools, text="Open App Folder", command=lambda: open_folder(self.app_base))
-        self.btn_open_server_cfg = ttk.Button(lf_tools, text="Open Server Config", command=self.open_server_config_dir)
+        self.btn_open_app = ttk.Button(lf_tools, text=self._t("adv.folders.open_app", "Open App Folder"), command=lambda: open_folder(self.app_base))
+        self.btn_open_server_cfg = ttk.Button(lf_tools, text=self._t("adv.folders.open_server_cfg", "Open Server Config"), command=self.open_server_config_dir)
         self.btn_open_app.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self.btn_open_server_cfg.grid(row=1, column=0, sticky="ew")
 
         # ---------------- RCON tab ----------------
         self.tab_rcon.columnconfigure(0, weight=1)
 
-        lf_rcon = ttk.LabelFrame(self.tab_rcon, text="RCON", padding=10)
+        lf_rcon = ttk.LabelFrame(self.tab_rcon, text=self._t("rcon.title", "RCON"), padding=10)
         lf_rcon.grid(row=0, column=0, sticky="ew")
         lf_rcon.columnconfigure(1, weight=1)
 
-        ttk.Label(lf_rcon, text="Saved Commands").grid(row=0, column=0, sticky="w")
+        ttk.Label(lf_rcon, text=self._t("rcon.saved_commands", "Saved Commands")).grid(row=0, column=0, sticky="w")
         self.cmb_rcon_saved = ttk.Combobox(lf_rcon, textvariable=self.var_rcon_saved, state="readonly", values=[])
         self.cmb_rcon_saved.grid(row=0, column=1, sticky="ew", padx=6)
         self.cmb_rcon_saved.bind("<<ComboboxSelected>>", lambda e: self.var_rcon_cmd.set(self.var_rcon_saved.get()))
 
-        ttk.Label(lf_rcon, text="Command").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(lf_rcon, text=self._t("rcon.command", "Command")).grid(row=1, column=0, sticky="w", pady=(8, 0))
         self.ent_rcon_cmd = ttk.Entry(lf_rcon, textvariable=self.var_rcon_cmd)
         self.ent_rcon_cmd.grid(row=1, column=1, sticky="ew", padx=6, pady=(8, 0))
         self.ent_rcon_cmd.bind("<Return>", lambda e: self.send_rcon())
 
-        self.btn_rcon_send = ttk.Button(lf_rcon, text="Send", command=self.send_rcon)
+        self.btn_rcon_send = ttk.Button(lf_rcon, text=self._t("rcon.send", "Send"), command=self.send_rcon)
         self.btn_rcon_send.grid(row=1, column=2, pady=(8, 0))
 
         btn_row = ttk.Frame(lf_rcon)
         btn_row.grid(row=2, column=1, sticky="w", padx=6, pady=(10, 0))
-        ttk.Button(btn_row, text="Save Command", command=self._rcon_save_current).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(btn_row, text="Remove Selected", command=self._rcon_remove_selected).grid(row=0, column=1)
+        ttk.Button(btn_row, text=self._t("rcon.save", "Save Command"), command=self._rcon_save_current).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(btn_row, text=self._t("rcon.remove", "Remove Selected"), command=self._rcon_remove_selected).grid(row=0, column=1)
 
-        ttk.Label(self.tab_rcon, text="Responses are written to the shared Console.").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(self.tab_rcon, text=self._t("rcon.note", "Responses are written to the shared Console.")).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
         # ---------------- Discord tab ----------------
         self.tab_discord.columnconfigure(0, weight=1)
 
-        lf_discord = ttk.LabelFrame(self.tab_discord, text="Discord Webhooks", padding=10)
+        lf_discord = ttk.LabelFrame(self.tab_discord, text=self._t("discord.title", "Discord Webhooks"), padding=10)
         lf_discord.grid(row=0, column=0, sticky="ew")
         lf_discord.columnconfigure(1, weight=1)
 
-        ttk.Checkbutton(lf_discord, text="Enable Discord notifications", variable=self.var_discord_enable).grid(
+        ttk.Checkbutton(lf_discord, text=self._t("discord.enable", "Enable Discord notifications"), variable=self.var_discord_enable).grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
 
-        ttk.Label(lf_discord, text="Webhook URL").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(lf_discord, text=self._t("discord.webhook_url", "Webhook URL")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(lf_discord, textvariable=self.var_discord_webhook_url).grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
 
-        ttk.Label(lf_discord, text="Poll interval (minutes)").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(lf_discord, text=self._t("discord.poll_interval", "Poll interval (minutes)")).grid(row=2, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(lf_discord, textvariable=self.var_discord_poll_interval_min).grid(row=2, column=1, sticky="w", padx=6, pady=(6, 0))
 
-        notify_frame = ttk.LabelFrame(self.tab_discord, text="Notifications", padding=10)
+        notify_frame = ttk.LabelFrame(self.tab_discord, text=self._t("discord.notifications", "Notifications"), padding=10)
         notify_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
 
-        ttk.Checkbutton(notify_frame, text="Server start", variable=self.var_discord_notify_start).grid(row=0, column=0, sticky="w", padx=(0, 14))
-        ttk.Checkbutton(notify_frame, text="Server stop", variable=self.var_discord_notify_stop).grid(row=0, column=1, sticky="w", padx=(0, 14))
-        ttk.Checkbutton(notify_frame, text="Server crash/exit", variable=self.var_discord_notify_crash).grid(row=0, column=2, sticky="w")
+        ttk.Checkbutton(notify_frame, text=self._t("discord.notify.start", "Server start"), variable=self.var_discord_notify_start).grid(row=0, column=0, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(notify_frame, text=self._t("discord.notify.stop", "Server stop"), variable=self.var_discord_notify_stop).grid(row=0, column=1, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(notify_frame, text=self._t("discord.notify.crash", "Server crash/exit"), variable=self.var_discord_notify_crash).grid(row=0, column=2, sticky="w")
 
-        ttk.Checkbutton(notify_frame, text="Player join", variable=self.var_discord_notify_join).grid(row=1, column=0, sticky="w", padx=(0, 14))
-        ttk.Checkbutton(notify_frame, text="Player leave", variable=self.var_discord_notify_leave).grid(row=1, column=1, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(notify_frame, text=self._t("discord.notify.join", "Player join"), variable=self.var_discord_notify_join).grid(row=1, column=0, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(notify_frame, text=self._t("discord.notify.leave", "Player leave"), variable=self.var_discord_notify_leave).grid(row=1, column=1, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
             notify_frame,
-            text="Include player IDs (advanced)",
+            text=self._t("discord.include_player_id", "Include player IDs (advanced)"),
             variable=self.var_discord_include_player_id,
         ).grid(row=2, column=0, sticky="w", padx=(0, 14), pady=(6, 0))
 
-        mention_frame = ttk.LabelFrame(self.tab_discord, text="Mentions", padding=10)
+        mention_frame = ttk.LabelFrame(self.tab_discord, text=self._t("discord.mentions.title", "Mentions"), padding=10)
         mention_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         mention_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(mention_frame, text="Mention mode").grid(row=0, column=0, sticky="w")
+        ttk.Label(mention_frame, text=self._t("discord.mentions.mode", "Mention mode")).grid(row=0, column=0, sticky="w")
         self.cmb_discord_mention_mode = ttk.Combobox(
             mention_frame,
             textvariable=self.var_discord_mention_mode,
@@ -4167,13 +4240,13 @@ class ServerManagerApp:
         )
         self.cmb_discord_mention_mode.grid(row=0, column=1, sticky="w", padx=6)
 
-        ttk.Label(mention_frame, text="Mention map (JSON or file path)").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(mention_frame, text=self._t("discord.mentions.map", "Mention map (JSON or file path)")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(mention_frame, textvariable=self.var_discord_mention_map_json).grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
 
         discord_btns = ttk.Frame(self.tab_discord)
         discord_btns.grid(row=3, column=0, sticky="w", pady=(10, 0))
-        ttk.Button(discord_btns, text="Send Test", command=self._discord_send_test).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(discord_btns, text="Open State Folder", command=self._discord_open_state_folder).grid(row=0, column=1)
+        ttk.Button(discord_btns, text=self._t("discord.buttons.send_test", "Send Test"), command=self._discord_send_test).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(discord_btns, text=self._t("discord.buttons.open_state_folder", "Open State Folder"), command=self._discord_open_state_folder).grid(row=0, column=1)
 
         # ---------------- INI Editor tab ----------------
         self.tab_ini.columnconfigure(0, weight=2)
@@ -4184,16 +4257,16 @@ class ServerManagerApp:
         ini_top.grid(row=0, column=0, columnspan=2, sticky="ew")
         ini_top.columnconfigure(1, weight=1)
 
-        ttk.Label(ini_top, text="Target").grid(row=0, column=0, sticky="w")
-        self.lbl_ini_target = ttk.Label(ini_top, text="(not loaded)")
+        ttk.Label(ini_top, text=self._t("ini.target", "Target")).grid(row=0, column=0, sticky="w")
+        self.lbl_ini_target = ttk.Label(ini_top, text=self._t("ini.not_loaded", "(not loaded)"))
         self.lbl_ini_target.grid(row=0, column=1, sticky="w", padx=6)
 
-        ttk.Button(ini_top, text="Load GameUserSettings.ini", command=self.load_gameusersettings).grid(row=0, column=2, padx=4)
-        ttk.Button(ini_top, text="Load Game.ini", command=self.load_game_ini).grid(row=0, column=3, padx=4)
-        ttk.Button(ini_top, text="Open Live + Staging", command=self.open_loaded_ini).grid(row=0, column=4, padx=4)
-        ttk.Button(ini_top, text="Resync from Upstream", command=self._ini_resync_from_upstream).grid(row=0, column=5, padx=4)
+        ttk.Button(ini_top, text=self._t("ini.load_gus", "Load GameUserSettings.ini"), command=self.load_gameusersettings).grid(row=0, column=2, padx=4)
+        ttk.Button(ini_top, text=self._t("ini.load_game", "Load Game.ini"), command=self.load_game_ini).grid(row=0, column=3, padx=4)
+        ttk.Button(ini_top, text=self._t("ini.open_both", "Open Live + Staging"), command=self.open_loaded_ini).grid(row=0, column=4, padx=4)
+        ttk.Button(ini_top, text=self._t("ini.resync", "Resync from Upstream"), command=self._ini_resync_from_upstream).grid(row=0, column=5, padx=4)
 
-        ttk.Label(ini_top, text="Filter").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(ini_top, text=self._t("ini.filter", "Filter")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ent_filter = ttk.Entry(ini_top, textvariable=self.var_ini_filter)
         ent_filter.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
         ent_filter.bind("<KeyRelease>", lambda e: self._ini_refresh_tree())
@@ -4204,8 +4277,8 @@ class ServerManagerApp:
         tree_frame.rowconfigure(0, weight=1)
 
         self.tree_ini = ttk.Treeview(tree_frame, columns=("value",), show="tree headings")
-        self.tree_ini.heading("#0", text="Section / Key")
-        self.tree_ini.heading("value", text="Value")
+        self.tree_ini.heading("#0", text=self._t("ini.tree.section_key", "Section / Key"))
+        self.tree_ini.heading("value", text=self._t("ini.tree.value", "Value"))
         self.tree_ini.column("value", width=420, anchor="w")
         self.tree_ini.grid(row=0, column=0, sticky="nsew")
 
@@ -4215,17 +4288,17 @@ class ServerManagerApp:
 
         self.tree_ini.bind("<<TreeviewSelect>>", lambda e: self._ini_on_select())
 
-        editor = ttk.LabelFrame(self.tab_ini, text="Edit Selected Line", padding=10)
+        editor = ttk.LabelFrame(self.tab_ini, text=self._t("ini.edit.title", "Edit Selected Line"), padding=10)
         editor.grid(row=2, column=1, sticky="nsew")
         editor.columnconfigure(1, weight=1)
 
-        ttk.Label(editor, text="Section").grid(row=0, column=0, sticky="w")
+        ttk.Label(editor, text=self._t("ini.edit.section", "Section")).grid(row=0, column=0, sticky="w")
         ttk.Entry(editor, textvariable=self.var_ini_section, state="readonly").grid(row=0, column=1, sticky="ew", padx=6)
 
-        ttk.Label(editor, text="Key").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(editor, text=self._t("ini.edit.key", "Key")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(editor, textvariable=self.var_ini_key, state="readonly").grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
 
-        ttk.Label(editor, text="Value").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(editor, text=self._t("ini.edit.value", "Value")).grid(row=2, column=0, sticky="w", pady=(10, 0))
 
         self.ent_ini_value = ttk.Entry(editor, textvariable=self.var_ini_value)
         self.cmb_ini_bool = ttk.Combobox(editor, textvariable=self.var_ini_bool, state="readonly", values=["True", "False"])
@@ -4241,43 +4314,37 @@ class ServerManagerApp:
 
         btn_line = ttk.Frame(editor)
         btn_line.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        ttk.Button(btn_line, text="Delete Selected Line", command=self._ini_delete_selected).grid(row=0, column=0, sticky="w")
+        ttk.Button(btn_line, text=self._t("ini.edit.delete", "Delete Selected Line"), command=self._ini_delete_selected).grid(row=0, column=0, sticky="w")
 
-        ttk.Label(
-            editor,
-            text="Edits are staged and auto-saved.\n"
-                 "On Start: staging is copied into the server folder.\n"
-                 "On Stop (Safe): baseline is restored into the server folder.",
-            wraplength=360
-        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(editor, text=self._t("ini.edit.help", "Edits are staged and auto-saved.\nOn Start: staging is copied into the server folder.\nOn Stop (Safe): baseline is restored into the server folder."), wraplength=360).grid(row=6, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
         self.ent_ini_value.bind("<KeyRelease>", lambda e: self._ini_schedule_apply())
         self.cmb_ini_bool.bind("<<ComboboxSelected>>", lambda e: self._ini_schedule_apply())
 
-        add_box = ttk.LabelFrame(self.tab_ini, text="Add / Append Line", padding=10)
+        add_box = ttk.LabelFrame(self.tab_ini, text=self._t("ini.add.title", "Add / Append Line"), padding=10)
         add_box.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         add_box.columnconfigure(1, weight=1)
         add_box.columnconfigure(3, weight=1)
 
-        ttk.Label(add_box, text="Section").grid(row=0, column=0, sticky="w")
+        ttk.Label(add_box, text=self._t("ini.add.section", "Section")).grid(row=0, column=0, sticky="w")
         ttk.Entry(add_box, textvariable=self.var_ini_add_section).grid(row=0, column=1, sticky="ew", padx=6)
 
-        ttk.Label(add_box, text="Key").grid(row=0, column=2, sticky="w")
+        ttk.Label(add_box, text=self._t("ini.add.key", "Key")).grid(row=0, column=2, sticky="w")
         ttk.Entry(add_box, textvariable=self.var_ini_add_key).grid(row=0, column=3, sticky="ew", padx=6)
 
-        ttk.Label(add_box, text="Value").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(add_box, text=self._t("ini.add.value", "Value")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(add_box, textvariable=self.var_ini_add_value).grid(row=1, column=1, columnspan=3, sticky="ew", padx=6, pady=(6, 0))
 
         add_btns = ttk.Frame(add_box)
         add_btns.grid(row=2, column=1, columnspan=3, sticky="w", pady=(8, 0))
-        ttk.Button(add_btns, text="Append Line (duplicate keys allowed)", command=self._ini_append_line).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(add_btns, text="Set/Replace First Occurrence", command=self._ini_set_line).grid(row=0, column=1)
+        ttk.Button(add_btns, text=self._t("ini.add.append", "Append Line (duplicate keys allowed)"), command=self._ini_append_line).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(add_btns, text=self._t("ini.add.setfirst", "Set/Replace First Occurrence"), command=self._ini_set_line).grid(row=0, column=1)
 
         # ---------------- Console (bottom) ----------------
         bottom.columnconfigure(0, weight=1)
         bottom.rowconfigure(0, weight=1)
 
-        lf_console = ttk.LabelFrame(bottom, text="Console", padding=5)
+        lf_console = ttk.LabelFrame(bottom, text=self._t("console.title", "Console"), padding=5)
         lf_console.grid(row=0, column=0, sticky="nsew")
         lf_console.columnconfigure(0, weight=1)
         lf_console.rowconfigure(0, weight=1)
@@ -4363,6 +4430,10 @@ class ServerManagerApp:
     def _apply_global_cfg_to_vars(self, cfg: GlobalConfig) -> None:
         self.var_steamcmd_dir.set(cfg.steamcmd_dir)
         self.var_auto_start_on_launch.set(cfg.start_on_startup)
+        try:
+            self.var_language.set(cfg.language or "en")
+        except Exception:
+            self.var_language.set("en")
 
     def _apply_cfg_to_vars(self, cfg: AppConfig) -> None:
         self.var_server_dir.set(cfg.server_dir)
@@ -4724,12 +4795,12 @@ class ServerManagerApp:
 
     def _sync_backup_label_texts(self) -> None:
         backup_enabled = bool(self.var_backup_on_stop.get())
-        auto_update_text = "Auto Update & Restart"
+        auto_update_text = self._t("ops.auto_update_restart", "Auto Update & Restart")
         if backup_enabled:
-            auto_update_text += " (Backup on Stop)"
-        update_restart_text = "Update / Restart (Safe)"
+            auto_update_text += self._t("backup.suffix_on_stop", " (Backup on Stop)")
+        update_restart_text = self._t("buttons.update_restart", "Update / Restart (Safe)")
         if backup_enabled:
-            update_restart_text += " + Backup"
+            update_restart_text += self._t("backup.plus_backup", " + Backup")
         try:
             self.chk_auto_update_restart.configure(text=auto_update_text)
         except Exception:
