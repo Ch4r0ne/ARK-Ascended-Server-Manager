@@ -3178,6 +3178,64 @@ class ServerManagerApp:
         except Exception:
             pass
 
+    def _humanize_ini_key(self, key: str) -> str:
+        s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key or "")
+        s = s.replace("_", " ").strip()
+        return s
+
+    def _ini_fallback_desc(self, section: str, key: str) -> str:
+        lang = getattr(self.global_cfg, "language", "en") if hasattr(self, "global_cfg") else "en"
+        k = (key or "").strip()
+        base = self._humanize_ini_key(k)
+        kl = k.lower()
+        if not base:
+            return ""
+        if kl.endswith("multiplier"):
+            if lang == "zh-CN":
+                return f"{base} 的倍率。"
+            return f"{base} multiplier."
+        if "drain" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的消耗速率倍率。"
+            return f"{base} drain rate multiplier."
+        if "speed" in kl or "scale" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的速度比例。"
+            return f"{base} speed scale."
+        if "interval" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的时间间隔倍率。"
+            return f"{base} interval multiplier."
+        if "damage" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的伤害倍率。"
+            return f"{base} damage multiplier."
+        if "health" in kl or "hp" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的生命相关倍率。"
+            return f"{base} health related multiplier."
+        if "regen" in kl or "recovery" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的恢复倍率。"
+            return f"{base} recovery multiplier."
+        if "count" in kl or "population" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的数量比例。"
+            return f"{base} count scale."
+        if "radius" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的半径设定。"
+            return f"{base} radius setting."
+        if "decay" in kl:
+            if lang == "zh-CN":
+                return f"{base} 的衰退/衰败时长倍率。"
+            return f"{base} decay period multiplier."
+        if kl.endswith("enabled") or kl.startswith("enable") or kl.startswith("allow"):
+            if lang == "zh-CN":
+                return f"启用或禁用 {base}。"
+            return f"Enable or disable {base}."
+        return ""
+
     # ---------------------------------------------------------------------
     # Profile / config init
     # ---------------------------------------------------------------------
@@ -4111,21 +4169,21 @@ class ServerManagerApp:
         lf_dinos.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
         dino_opts = [
-            ("Default", ""),
-            ("No Dinos", "NoDinos"),
-            ("No Dinos Except Forced Spawn", "NoDinosExceptForcedSpawn"),
-            ("No Dinos Except Streaming Spawn", "NoDinosExceptStreamingSpawn"),
-            ("No Dinos Except Manual Spawn", "NoDinosExceptManualSpawn"),
-            ("No Dinos Except Water Spawn", "NoDinosExceptWaterSpawn"),
+            ("adv.dinos.opt.default", "", "Default"),
+            ("adv.dinos.opt.no_dinos", "NoDinos", "No Dinos"),
+            ("adv.dinos.opt.no_dinos_forced", "NoDinosExceptForcedSpawn", "No Dinos Except Forced Spawn"),
+            ("adv.dinos.opt.no_dinos_streaming", "NoDinosExceptStreamingSpawn", "No Dinos Except Streaming Spawn"),
+            ("adv.dinos.opt.no_dinos_manual", "NoDinosExceptManualSpawn", "No Dinos Except Manual Spawn"),
+            ("adv.dinos.opt.no_dinos_water", "NoDinosExceptWaterSpawn", "No Dinos Except Water Spawn"),
         ]
-        for i, (label, val) in enumerate(dino_opts):
-            ttk.Radiobutton(lf_dinos, text=label, variable=self.var_dino_mode, value=val).grid(row=i, column=0, sticky="w")
+        for i, (k, val, fb) in enumerate(dino_opts):
+            ttk.Radiobutton(lf_dinos, text=self._t(k, fb), variable=self.var_dino_mode, value=val).grid(row=i, column=0, sticky="w")
 
         lf_logs = ttk.LabelFrame(self.tab_adv, text=self._t("adv.logs.title", "Logs"), padding=10)
         lf_logs.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
-        ttk.Checkbutton(lf_logs, text="servergamelog", variable=self.var_log_servergamelog).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(lf_logs, text="servergamelogincludetribelogs", variable=self.var_log_servergamelogincludetribelogs).grid(row=1, column=0, sticky="w")
-        ttk.Checkbutton(lf_logs, text="ServerRCONOutputTribeLogs", variable=self.var_log_serverrconoutputtribelogs).grid(row=2, column=0, sticky="w")
+        ttk.Checkbutton(lf_logs, text=self._t("adv.logs.servergamelog", "servergamelog"), variable=self.var_log_servergamelog).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(lf_logs, text=self._t("adv.logs.servergamelogincludetribelogs", "servergamelogincludetribelogs"), variable=self.var_log_servergamelogincludetribelogs).grid(row=1, column=0, sticky="w")
+        ttk.Checkbutton(lf_logs, text=self._t("adv.logs.serverrconoutputtribelogs", "ServerRCONOutputTribeLogs"), variable=self.var_log_serverrconoutputtribelogs).grid(row=2, column=0, sticky="w")
 
         lf_runtime = ttk.LabelFrame(self.tab_adv, text=self._t("adv.runtime.title", "Mods & RCON"), padding=10)
         lf_runtime.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
@@ -4144,21 +4202,21 @@ class ServerManagerApp:
         lf_mech.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
 
         mech_items = [
-            ("DisableCustomCosmetics", self.var_m_disablecustomcosmetics),
-            ("AutoDestroyStructures", self.var_m_autodestroystructures),
-            ("ForceRespawnDinos", self.var_m_forcerespawndinos),
-            ("NoWildBabies", self.var_m_nowildbabies),
-            ("ForceAllowCaveFlyers", self.var_m_forceallowcaveflyers),
-            ("disabledinonetrangescaling", self.var_m_disabledinonetrangescaling),
-            ("UnstasisDinoObstructionCheck", self.var_m_unstasisdinoobstructioncheck),
-            ("AlwaysTickDedicatedSkeletalMeshes", self.var_m_alwaystickdedicatedskeletalmeshes),
-            ("disableCharacterTracker", self.var_m_disablecharactertracker),
-            ("UseServerNetSpeedCheck", self.var_m_useservernetspeedcheck),
-            ("StasisKeepControllers", self.var_m_stasiskeepcontrollers),
-            ("ignoredupeditems", self.var_m_ignoredupeditems),
+            ("adv.mech.DisableCustomCosmetics", "DisableCustomCosmetics", self.var_m_disablecustomcosmetics),
+            ("adv.mech.AutoDestroyStructures", "AutoDestroyStructures", self.var_m_autodestroystructures),
+            ("adv.mech.ForceRespawnDinos", "ForceRespawnDinos", self.var_m_forcerespawndinos),
+            ("adv.mech.NoWildBabies", "NoWildBabies", self.var_m_nowildbabies),
+            ("adv.mech.ForceAllowCaveFlyers", "ForceAllowCaveFlyers", self.var_m_forceallowcaveflyers),
+            ("adv.mech.disabledinonetrangescaling", "disabledinonetrangescaling", self.var_m_disabledinonetrangescaling),
+            ("adv.mech.UnstasisDinoObstructionCheck", "UnstasisDinoObstructionCheck", self.var_m_unstasisdinoobstructioncheck),
+            ("adv.mech.AlwaysTickDedicatedSkeletalMeshes", "AlwaysTickDedicatedSkeletalMeshes", self.var_m_alwaystickdedicatedskeletalmeshes),
+            ("adv.mech.disableCharacterTracker", "disableCharacterTracker", self.var_m_disablecharactertracker),
+            ("adv.mech.UseServerNetSpeedCheck", "UseServerNetSpeedCheck", self.var_m_useservernetspeedcheck),
+            ("adv.mech.StasisKeepControllers", "StasisKeepControllers", self.var_m_stasiskeepcontrollers),
+            ("adv.mech.ignoredupeditems", "ignoredupeditems", self.var_m_ignoredupeditems),
         ]
-        for i, (label, var) in enumerate(mech_items):
-            ttk.Checkbutton(lf_mech, text=label, variable=var).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 14), pady=2)
+        for i, (key, fallback, var) in enumerate(mech_items):
+            ttk.Checkbutton(lf_mech, text=self._t(key, fallback), variable=var).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 14), pady=2)
 
         lf_tools = ttk.LabelFrame(self.tab_adv, text=self._t("adv.folders.title", "Folders"), padding=10)
         lf_tools.grid(row=3, column=1, sticky="nsew", padx=5, pady=5)
@@ -4312,11 +4370,14 @@ class ServerManagerApp:
         self.canvas_ticks = tk.Canvas(editor, height=14, highlightthickness=0)
         self.canvas_ticks.grid(row=4, column=0, columnspan=2, sticky="ew")
 
+        self.lbl_ini_desc = ttk.Label(editor, text="", wraplength=360, foreground=THEME_COLORS["muted"])
+        self.lbl_ini_desc.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
         btn_line = ttk.Frame(editor)
-        btn_line.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        btn_line.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(btn_line, text=self._t("ini.edit.delete", "Delete Selected Line"), command=self._ini_delete_selected).grid(row=0, column=0, sticky="w")
 
-        ttk.Label(editor, text=self._t("ini.edit.help", "Edits are staged and auto-saved.\nOn Start: staging is copied into the server folder.\nOn Stop (Safe): baseline is restored into the server folder."), wraplength=360).grid(row=6, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(editor, text=self._t("ini.edit.help", "Edits are staged and auto-saved.\nOn Start: staging is copied into the server folder.\nOn Stop (Safe): baseline is restored into the server folder."), wraplength=360).grid(row=7, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
         self.ent_ini_value.bind("<KeyRelease>", lambda e: self._ini_schedule_apply())
         self.cmb_ini_bool.bind("<<ComboboxSelected>>", lambda e: self._ini_schedule_apply())
@@ -5443,6 +5504,14 @@ class ServerManagerApp:
         self._ini_selected_line_idx = idx
         self.var_ini_section.set(line.section)
         self.var_ini_key.set(line.key)
+        desc_key = f"ini.desc.{line.section}.{line.key}"
+        desc = self._t(desc_key, "")
+        try:
+            if not desc:
+                desc = self._ini_fallback_desc(line.section, line.key)
+            self.lbl_ini_desc.configure(text=desc)
+        except Exception:
+            pass
 
         if line.section.strip():
             self.var_ini_add_section.set(line.section)
